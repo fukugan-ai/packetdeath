@@ -447,6 +447,24 @@ For announcements that exist only as text, with no machine-readable list, the op
 That file starts on the watch side (`--watch-distrust`).
 There is no feature that reads announcement text by machine and puts it on a list, because one wrongly added line would stop traffic.
 
+### How a compromised eMudhra certificate is avoided
+
+The operating system and the browser still keep the roots above the compromised intermediates (such as "Comodo AAA Services") in their trust stores.
+A fake site built on a compromised intermediate therefore looks like a valid certificate to the operating system and the browser alone.
+packetdeath stops it before that point, in this order.
+
+1. Every day, `scripts/pd-malware-feed.sh` fetches Mozilla's OneCRL (the list of revoked certificates) and writes `distrust-onecrl.txt`.
+   Each line is either a fingerprint of a certificate's public key (`spki-sha256`) or an issuer name and serial number pair (`issuer-serial`).
+   The number of eMudhra and emSign lines appears in the feed log as `onecrl emudhra=<n>`.
+2. When the PC's traffic goes through the proxy, packetdeath checks every certificate in the chain the destination presents (the site certificate, the intermediate, and the root above it) against that list.
+   For traffic it does not open, `--probe-chains` opens a separate TLS connection to the same destination to read the chain.
+3. If any certificate in the chain matches a line on the list, packetdeath cuts the connection to that destination and records `"reason":"chain"` in `flows.jsonl`.
+   Even though the operating system trusts the root, a chain that passes through a compromised intermediate stops here.
+4. Legitimate sites that use an uncompromised intermediate under the same root do not match the list and are not stopped.
+
+This flow assumes the compromised intermediates are on OneCRL.
+A fake site that appears before they are listed, and the first connection before `--probe-chains` has read the chain, still get through (see the limits above).
+
 ### Undoing an over-block
 
 | What happened | How to undo | Takes effect in |
