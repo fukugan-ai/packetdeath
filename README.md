@@ -8,6 +8,29 @@ The watcher compares the name of each destination with a list, and cuts only the
 It is not a browser extension, so it does not rewrite anything inside the browser.
 You can also point other devices in your home, such as an iPhone, at the same watcher.
 
+## What it can do (10 stages)
+
+packetdeath is built in stages.
+The stage numbers are the same as the "段階" (stage) numbers in `docs/design.md`.
+Every stage works only when you pass its options.
+
+| Stage | What it does | Options |
+|---|---|---|
+| 1 Observe | Records destinations without stopping anything (the Windows version is 1w and reads a pktmon capture) | `observe`; on Windows, `--pcapng` (an option of `block` and `service-install`) |
+| 2 Block | Cuts connections to destination names on a list; names on the allowlist always pass | `--blocklist` `--allowlist` |
+| 3 CNAME | Cuts connections whose DNS alias points to a listed name (Linux `block`; `proxy` does not accept it) | `--dns` |
+| 4 IDS/IPS | Reads the alerts of the detection tool Suricata and cuts destinations that raised a severe alert (Linux `block`) | `--eve` `--ips-severity` `--ips-sids` `--ips-ttl` |
+| 5 Destination IP | Cuts listed addresses (IPs), including connections that carry no name | `--iplist` |
+| 6 Read outside scan results | Reads the "malicious" verdicts that an outside scanner wrote to `av.jsonl` and cuts those destinations (`block` and `proxy`). Passing the `av.jsonl` of stage 8 is not the default setup, because it would also catch other sites that share a CDN IP | `--av` |
+| 7 Proxy | Relays the traffic of other devices and applies the blocklist and allowlist of stage 2, the iplist of stage 5 and the `--av` of stage 6 (it does not accept `--dns`, `--eve` or `--ips-*`) | `proxy --listen` `--deny` |
+| 8 MITM and antivirus | For destinations you name, opens encrypted traffic and inspects downloaded files with ClamAV | `--mitm-list` `--ca-dir` `--clamd` |
+| 9 Malware feeds | Imports public lists of bad destinations daily and cuts them with the blocklist of stage 2 and the iplist of stage 5 | `scripts/pd-malware-feed.sh`; `--blocklist` and `--iplist` (repeatable) |
+| 10 Active defense | Cuts destinations whose certificate chain has been announced as untrustworthy; the blocking side can be put back to watch-only with one action | `--distrust` `--watch-distrust` `--probe-chains` `--defense-off` `--breaker-hosts` |
+
+Stages 4 to 10 are explained in "Details" and "Active defense".
+Stage 4 uses Suricata, and stage 8 uses ClamAV and a certificate that you install.
+Suricata and ClamAV are separate tools; this repository does not include them.
+
 ## The problem
 
 - Ads and trackers add a lot of traffic, and pages load slowly.
@@ -107,7 +130,8 @@ Check, site by site, whether a site's terms of service forbid blocking, as video
 | `proxy` | No admin rights |
 | `block` | root and `iptables`, and a Linux kernel with nfqueue |
 | Windows service | Admin rights and pktmon. The only way of producing the Windows executable that has been checked is cross building from Linux with `cargo build --release --target x86_64-pc-windows-gnu` |
-| Inspection (optional) | ClamAV's `clamd`, used to inspect downloads over HTTPS |
+| IDS/IPS (optional) | Suricata (installed separately; used with Linux `block`) |
+| Inspection (optional) | ClamAV's `clamd`, used to inspect downloads over HTTPS, and the packetdeath certificate installed on the device |
 
 ## Quick start
 
@@ -198,7 +222,7 @@ The lists that ship with the repository:
 
 | File | Contents | Source |
 |---|---|---|
-| `blocklists/telemetry-windows.txt` | Six destinations for Windows and Office diagnostic data | A short list picked from a real machine's log |
+| `blocklists/telemetry-windows.txt` | Five destinations for Windows and Office diagnostic data | A short list picked from a real machine's log |
 | `allowlists/microsoft-required.txt` | Destinations Microsoft publishes as required for its services | Converted from Microsoft's public API |
 | `allowlists/pihole-common.txt` | The widely used Pi-hole "do not block" destinations | Converted from `anudeepND/whitelist` (the license follows the original; NOT VERIFIED, check the original's notice) |
 | `allowlists/user-named.txt` | Destinations a user asked for by name | Written by hand |
@@ -228,29 +252,235 @@ The logs contain every destination the device connected to.
 Treat them as secret and do not share them.
 packetdeath does not send logs anywhere.
 
-### Inspecting the content of connections (optional)
+### Detecting and stopping intrusions (IDS/IPS)
 
-Only when you give all three of `--mitm-list`, `--ca-dir` and `--clamd`, packetdeath decrypts HTTPS and inspects downloads, and only for the destinations in `--mitm-list`.
-Decryption needs you to make the device trust a certificate of the certificate authority (**CA**) that packetdeath created.
-packetdeath does not install that certificate on any device.
+An **IDS** (intrusion detection system) finds suspicious traffic and reports it.
+An **IPS** (intrusion prevention system) stops the traffic it finds.
+packetdeath has no rules of its own for recognizing suspicious traffic.
+The detection tool **Suricata**, which does have rules, writes alerts to a file called `eve.json`, and packetdeath's `block` reads those alerts and stops the destinations.
 
-Anyone who can read `ca.key` (the CA's private key) can impersonate any site to a device that trusts the certificate.
+You install Suricata separately.
+packetdeath does not start Suricata.
+Run Suricata in detection-only mode (IDS mode); packetdeath does the stopping.
+For installation and startup, follow the Suricata documentation (<https://docs.suricata.io/>).
+
+You choose which alerts to act on with one of two options.
+
+- `--ips-severity <N>`: act on alerts whose severity (`alert.severity`, 1 to 3, where 1 is the most severe) is N or lower.
+- `--ips-sids <file>`: a file with one rule number (sid) per line; act on alerts for the listed numbers.
+
+If you pass both, an alert that matches either one is acted on.
+If you pass neither, nothing is stopped because of an alert.
+`--eve <path>` gives the location of `eve.json`.
+A stopped destination stays stopped for `--ips-ttl <seconds>` (default 300).
+
+```
+sudo iptables -I OUTPUT -p tcp --dport 80 -j NFQUEUE --queue-num 1808 --queue-bypass
+sudo ./target/release/packetdeath block --queue 1808 --eve <location of eve.json> --ips-severity 1 --log-dir <log folder>
+```
+
+This mechanism has four limits.
+
+- An alert is written after the traffic has passed, so the packet that raised the alert gets through, and what stops is later traffic to the same destination.
+- Only traffic that an iptables rule sends to the watcher can be stopped (the example above covers TCP port 80).
+- The severity comes from the classification (classtype) of the Suricata rule. In the measurement recorded in the design document, all 30 alerts on one machine were internal notices of severity 3, so `--ips-severity 1` stopped none of them.
+- The detection rate depends on the quality of the Suricata rules, so the project cannot say that it prevents malware.
+
+If Suricata stops, traffic keeps flowing; alerts just stop arriving.
+This stage is an option of Linux `block`.
+How to use Suricata on Windows is unconfirmed in the design document (NOT VERIFIED).
+
+### Opening encrypted traffic (MITM)
+
+**MITM** (man in the middle) means that the relay decrypts traffic midway, looks at the content, and encrypts it again before passing it on.
+Misused, it is eavesdropping, so packetdeath does it only after you install the packetdeath certificate on your own device and allow it.
+
+Only when you give all three of `--mitm-list`, `--ca-dir` and `--clamd` does packetdeath open encrypted traffic (HTTPS), and only for the destinations in `--mitm-list`.
+If you give only one or two, it starts with opening disabled and prints the missing option names as a `[warn]`.
+On Windows it ignores all three and prints a `[warn]`.
+
+In the opened traffic it looks only at downloaded files.
+A connection is opened only when all six of these hold.
+
+1. All three options are given and the CA (the certificate issuer) can be read.
+2. The connection did not match the blocking rules (blocklist, iplist, av).
+3. The destination is not on the allowlist.
+4. The destination is on `--mitm-list`.
+5. The destination port is 443 and the connection was not made to a bare IP address.
+6. The pair of device and destination is not one that packetdeath stopped opening and remembers for one hour (see "What happens without the certificate").
+
+#### What happens without the certificate
+
+When a device without the certificate connects to a destination on `--mitm-list`, the browser shows a certificate warning and the first connection fails.
+packetdeath remembers that pair of device and destination for one hour and, from the next connection, passes the traffic without opening it.
+Destinations that are not on the list are passed without opening, as before, whether or not the device has the certificate.
+
+#### Why the certificate is dangerous
+
+packetdeath does not install this certificate on any device.
+You install it yourself.
+
+Anyone who can read `ca.key` (the CA's private key) can impersonate any site to a device that has installed the certificate.
+In other words, if `ca.key` leaks, the encrypted traffic of that device can be opened.
 Keep `ca.key` outside the repository, with mode `0600`.
-Do not put destinations of apps that pin certificates, such as banking apps and password managers, in `--mitm-list`.
-The procedure is in `docs/mitm-runbook.md` and in the "段階8 MITM" section of `docs/design.md` (both in Japanese).
+The CA is valid for 730 days.
 
-### Stopping distrusted certificates (optional)
+Do not put destinations of apps that pin certificates in `--mitm-list`, such as banking apps, password managers, Apple services, Microsoft sign-in, and Windows Update.
+Opening them breaks those apps.
+When in doubt, leave a destination out.
 
-There are options that stop connections to sites presenting certificates that a browser vendor or similar source has announced as untrustworthy.
-Start with `--watch-distrust`, which only records.
-Move to `--distrust` after you have looked at the result of `defense-report --watch`.
-The details are in the "段階10 能動防御" section of `docs/design.md` (in Japanese).
+#### Installing and removing the certificate
+
+A proxy started with all three options serves the certificate `ca.crt` at `http://<proxy IP>:<port>/ca.crt`.
+It never serves `ca.key`.
+
+- Windows (current user only): run `certutil -user -addstore Root "<path>\ca.crt"` on the saved `ca.crt`.
+  To remove it, open `certmgr.msc` and delete `packetdeath CA <date>` under "Trusted Root Certification Authorities".
+- iPhone: open the URL above in Safari, install the profile, and turn it on under "Certificate Trust Settings".
+  To remove it, delete the profile under "VPN & Device Management" in Settings.
+  The wording of these screens comes from memory in the design document, so check it the first time you do this (NOT VERIFIED).
+- Firefox keeps its own trust store and is out of scope.
+
+If `ca.key` leaks, do this in order:
+
+1. Remove the old certificate from every device.
+2. Stop the proxy.
+3. Delete the contents of `--ca-dir`.
+4. Start the proxy.
+   A new CA is created and the startup log shows its new fingerprint.
+5. Install the new `ca.crt` on every device again.
+
+During steps 1 to 5, opening fails and traffic falls back to uninspected passing; traffic does not stop.
+Day-to-day operation (adding destinations, restarting, rescuing a false positive) is in `docs/mitm-runbook.md`.
+The design is in the "段階8 MITM" section of `docs/design.md` (both in Japanese).
+
+### Virus inspection (antivirus)
+
+Downloads in opened traffic are passed to **ClamAV** (a free virus-scanning tool) for inspection.
+You install ClamAV's resident part (`clamd`) separately.
+`--clamd` takes the path of the `clamd` socket or an `addr:port`.
+
+```
+./target/release/packetdeath proxy --listen 127.0.0.1:8899 --blocklist pdtrial/blocklist.txt --mitm-list pdtrial/mitm-list.txt --ca-dir pdtrial/ca --clamd <path of the clamd socket> --deny 403 --log-dir pdtrial/log
+```
+
+There are three outcomes.
+
+| Result | What the user sees |
+|---|---|
+| Judged bad (FOUND) | A `403` replaces the file. The logs show `"reason":"av"` in `flows.jsonl` and `malicious` in `av.jsonl` |
+| Judged clean (OK) | The file is passed on as it is, and `av.jsonl` gets a `clean` line |
+| Could not inspect (clamd did not answer, timeout, size limit) | The file is passed on as it is, and a `[warn]` is printed |
+
+When it cannot inspect, it leans toward letting the file through (fail-open).
+That way a stopped scanner does not stop the user's downloads.
+The cost is that a file it could not inspect arrives uninspected.
+
+A response is inspected only when all of these hold.
+
+- It is a `200` response to a `GET`, with a `Content-Length` of at least 1 byte and at most 8191 MiB.
+  A response with no `Content-Length` is also inspected, and inspection is given up once the body exceeds 8191 MiB.
+- It carries `Content-Disposition: attachment`, or its `Content-Type` is not a page component (`text/html`, `image/*`, `video/*`, `application/json`, and similar).
+- `Content-Encoding` is absent or `identity`.
+
+Three measures keep inspection from slowing things down.
+
+- Only downloads are inspected, and page components and video are passed without inspection.
+- To replace a bad file with a `403`, it receives the whole body before inspecting.
+  A file under inspection therefore does not reach the device by even 1 byte until inspection ends.
+- The wait is capped at 1260 seconds, after which it gives up and passes the file.
+  A new zip inspected for the first time took 4.6 seconds for 16 files and 9 to 10 seconds for 679 files (measured on 2026-10-03).
+
+Some files pass without inspection.
+
+- Files over 8191 MiB.
+- Resumed downloads (`206`).
+- Password-protected archives.
+- Responses delivered compressed with `br` or `gzip`.
+- Files that pose as page components.
+- Downloads that arrive while the inspection budget (8 GiB of bodies held at once) is used up.
+
+The detection rate depends on the quality of ClamAV's signatures.
+The project cannot say that it prevents malware.
+It inspects only files that come from destinations on `--mitm-list`.
+It does not inspect files that arrive by USB or by traffic that bypasses the proxy.
+
+### Ads inside encrypted traffic
+
+What it can do: stop ad traffic connection by connection, even when encrypted, by the name it connects to (SNI) and the destination IP.
+What it cannot do: remove only the ad portion from the content of opened traffic.
+
+packetdeath opens encrypted traffic only to inspect downloaded files.
+Whether something is an ad is still decided by name and destination, not by the content seen after opening.
+Ads served under the site's own name, and ads stitched into a video, cannot be stopped.
+
+## Active defense (preparing for certificate incidents)
+
+**Active defense** (stage 10) applies certificates and destinations that public announcements and lists call bad to your traffic before an incident reaches you.
+The trigger was the compromise of intermediate certificates of the certificate authority eMudhra.
+
+An **intermediate certificate** is a certificate that a certificate authority (the issuer of identity cards) hands to a subordinate issuer.
+Whoever holds a compromised intermediate certificate can show a convincing fake site to any device that trusts it.
+
+The facts about the incident are split here into what was checked and what was not.
+
+| Fact | How it was checked |
+|---|---|
+| The compromise was a leak of private keys, not weak keys. Multiple intermediate certificates were compromised. The signing roots (top-level certificates) are "Comodo AAA Services" and "emSign ECC Root CA - G3", and they are in the trust store of Red Hat products. In the Go ecosystem it is tracked as CVE-2026-111943 | Read Red Hat's bulletin RHSB-2026-012 (retrieved 2026-10-22) |
+| The number of compromised intermediate certificates is 8 | Not confirmed (NOT VERIFIED). Red Hat's bulletin gives no count, Mozilla's announcement could not be retrieved, and the design document treats the number as transcribed |
+| The number of eMudhra and emSign records in Mozilla's revocation list (OneCRL) | The feed logs one line, `onecrl emudhra=<n>`. Read the number to confirm it (NOT VERIFIED) |
+
+packetdeath prepares in four ways.
+
+1. **Import the distrust lists daily.** `scripts/pd-malware-feed.sh` fetches OneCRL (Mozilla's list of revoked certificates) and the certificate fingerprints of SSL Blacklist, and converts them into `distrust-onecrl.txt` and `sslbl-certs.txt`.
+2. **Stop destinations that use such a chain.** When the certificate chain of a destination (the sequence from the root to the destination) contains a certificate on the list you passed with `--distrust <file>`, the connection is cut.
+   For opened traffic (stage 8), the TLS chain to the destination is checked.
+   For traffic that is not opened, `--probe-chains` makes packetdeath open a separate TLS connection to the same destination, read the chain, and stop later connections to destinations with a distrusted chain.
+   This check connection also sends, as a plain-text SNI, the name of a destination that the client hid with ECH.
+   An observer on the path can see the name that was meant to be hidden (whether Chrome uses ECH through a proxy is NOT VERIFIED).
+3. **Watch first.** `--watch-distrust`, `--watch-blocklist` and `--watch-iplist` only write hits to `watch.jsonl` and stop nothing.
+   `packetdeath defense-report --watch <watch.jsonl>` counts hits per source and prints `promote=yes` when conditions are met, such as 7 days of records and 0 allowlisted hits.
+   A person decides whether to move a source to the blocking side.
+4. **Avoid stopping too much.** See the next section.
+
+For announcements that exist only as text, with no machine-readable list, the operator adds one line to `distrust-manual.txt`.
+That file starts on the watch side (`--watch-distrust`).
+There is no feature that reads announcement text by machine and puts it on a list, because one wrongly added line would stop traffic.
+
+### Undoing an over-block
+
+| What happened | How to undo | Takes effect in |
+|---|---|---|
+| One destination was stopped by mistake | Add its name to the allowlist, one line. The allowlist wins over a distrusted chain | About 0.3 seconds |
+| You want the whole blocking side of active defense back on watch-only | Create the file you gave to `--defense-off <path>` (`touch <path>`). Delete it to restore | About 0.3 seconds |
+| One list stopped more than `--breaker-hosts` destinations (default 5) in 10 minutes | A safety valve (breaker) drops that list alone to watch-only | The next decision after a hit |
+
+While the `--defense-off` file exists, only blocking by the distrust lists and by the chain check (`--probe-chains`) is switched off.
+The ad blocklist and the allowlist keep working.
+The default of 5 for `--breaker-hosts` is provisional (ASSUMPTION) and will be decided again from the watch records.
+
+### Terms of the imported lists
+
+OneCRL, Feodo Tracker and SSL Blacklist are fetched without a key.
+ThreatFox and URLhaus are for users authenticated at abuse.ch, so when the `--auth <key file>` file is missing or its mode is looser than `0600`, no request is sent to them.
+In that case `malware-domains.txt` and `malware-ips.txt` stay as they were and grow stale, and the script ends with `rc=1`.
+Getting a key requires you to authenticate at abuse.ch yourself.
+
+### Limits
+
+- The first connection passes, because the chain check runs after the connection is let through.
+- Active defense is wired into `proxy`, so it does not reach traffic that bypasses the proxy (tools that do not read the automatic configuration) or the Windows service path.
+- The chain check is not on the `block` path (traffic of tools on this machine).
+- The lists are only OneCRL, SSL Blacklist and the lines you add by hand. Chrome's revocation list (CRLSet) and Microsoft's distrust list are not included.
+- The text of Mozilla's announcement could not be read when the design document was written (NOT VERIFIED).
+
+The design and acceptance IDs are in the "段階10 能動防御" section of `docs/design.md` (in Japanese).
 
 ## Importing outside lists
 
 `scripts/pd-malware-feed.sh --out <output folder> [--auth <key file>]` fetches public lists and converts them into the form packetdeath reads.
 packetdeath itself never starts this script or fetches any list.
-It runs with `curl` and `sh`.
+It runs with `curl`, `sh` and `jq`.
 
 | List | Key | Terms |
 |---|---|---|
@@ -345,7 +575,7 @@ Automatic start after a reboot has not been tested on a real run (NOT VERIFIED).
 
 ### Logs and keys
 
-- The logs (`flows.jsonl`, `dns.jsonl`, `av.jsonl`) contain the destinations the device connected to.
+- The logs (`flows.jsonl`, `dns.jsonl`, `av.jsonl`, `watch.jsonl`) contain the destinations the device connected to.
   Treat them as secret.
 - Never put the CA private key (`ca.key`) in the repository (`.gitignore` excludes `*.key` and `*.crt`).
 - Apart from relaying your traffic, packetdeath and its bundled script open only two kinds of connections to the outside.

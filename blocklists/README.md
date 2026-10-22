@@ -13,8 +13,8 @@ SNI 判定（段階2「遮断」）で同じ遮断を行う。
 ### 出所
 
 実機 Windows 11 の `flows.jsonl`（3776行）に実際に出た
-Microsoft 系 SNI から、診断データ送信に絞って選んだ6行。同じ実機の log を対象に、
-この6行が「止めたい7件」を全部 当て「止めてはいけない7件」を1件も当てないことを、
+Microsoft 系 SNI から、診断データ送信に絞って選んだ5行。同じ実機の log を対象に、
+この5行が「止めたい7件」を全部 当て「止めてはいけない7件」を1件も当てないことを、
 `tests/independent_telemetry_blocklist.rs` が `Blocklist::load` /
 `Blocklist::matches` を直接 呼んで確かめる。
 

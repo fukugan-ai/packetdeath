@@ -1,8 +1,8 @@
 # Windows / Office / MSN の診断データ送信 blocklist。
 # 出所・止めない理由は blocklists/README.md を見よ。
 # 実測: 実機 Windows 11 の flows.jsonl（3776行）を
-# 走査して得た Microsoft 系 SNI から選んだ6行。
-# 同じ実機の log を対象に、この6行が「止めたい7件」を全部 当て
+# 走査して得た Microsoft 系 SNI から選んだ5行。
+# 同じ実機の log を対象に、この5行が「止めたい7件」を全部 当て
 # 「止めてはいけない7件」を1件も当てないことを、
 # tests/independent_telemetry_blocklist.rs が
 # Blocklist::load 経由で確認する。
