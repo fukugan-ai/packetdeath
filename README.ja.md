@@ -8,6 +8,9 @@
 ブラウザの拡張機能ではないので、ブラウザの中身を書き換えません。
 同じ見張り役に、家の中の別の端末(iPhone など)の通信を向けることもできます。
 
+Windows で使う人は、先に「Windows で使う」の節を読んでください。
+実行 file の入手、置き場、自動起動、外し方までを順に書いています。
+
 ## できること(10 段)
 
 packetdeath は、段を重ねて作ってあります。
@@ -82,7 +85,7 @@ packetdeath の見張り役は、この名前を見ます。
 |---|---|---|---|
 | `proxy` | 通信の中継役(**proxy**)。端末のブラウザや iPhone の proxy 欄をこの中継役へ向ける | 要らない | Linux |
 | `block` | Linux の核(kernel)が通信を見張り役へ渡す仕組み(**nfqueue**)を使う。端末から出る通信を見る | 要る(root) | Linux |
-| Windows サービス | Windows 標準の通信記録道具(**pktmon**)が残した記録を読み、確立済みの接続を切る | 要る | Windows 11 |
+| Windows サービス | Windows 標準の通信記録道具(**pktmon**)が残した記録を読み、確立済みの接続を切る設計。記録までは動いたが、切ることは確かめられていない(PW-7 不通過) | 要る | Windows 11(記録まで) |
 
 ## 確かめた結果と限界
 
@@ -144,7 +147,7 @@ packetdeath の見張り役は、この名前を見ます。
 2. リポジトリを取得して build する。
 
    ```
-   git clone <このリポジトリの URL>
+   git clone https://github.com/fukugan-ai/packetdeath.git
    cd packetdeath
    cargo build --release
    ```
@@ -226,6 +229,321 @@ allowlist を渡す起動の例です。
 | `allowlists/microsoft-required.txt` | Microsoft が公開している、動作に必要な宛先 | Microsoft 公式の公開 API を変換 |
 | `allowlists/pihole-common.txt` | Pi-hole で定番の「止めてはいけない」宛先 | `anudeepND/whitelist` を変換した物(ライセンスは配布元に従う。NOT VERIFIED、配布元の表示を確かめる) |
 | `allowlists/user-named.txt` | 利用者が名指しした宛先 | 手書き |
+
+## Windows で使う
+
+結論：Windows だけで使うなら、方法 A(Windows の中で proxy を動かす)を勧めます。
+WSL や Linux の機械を持っていない人は、A を選びます。
+同じ LAN に Linux か WSL の機械があるなら、方法 B(別の機械の proxy を使う)も選べます。
+方法 C(Windows サービス)は、宛先を記録できますが、接続を止められることは確かめられていません(受入 PW-7 が不通過)。
+止めたいときは A か B を使います。
+
+方法 A の起動、遮断、PAC の配信は、Windows の実機で確かめました(2026-10-22)。
+条件は、管理者の権限で `127.0.0.1:18899` に待たせ、PAC は `curl` で取得し、OS の proxy 設定は入れていない、です。
+非管理者での実走は確かめていません(NOT VERIFIED)。
+結果は、`example.com` が `200`、`events.data.microsoft.com` への `CONNECT` が `403`、`/proxy.pac` が `200` で本文は `PROXY 127.0.0.1:18899; DIRECT` でした。
+通信の中身の検査と能動防御の `[warn]` が 2 行出て、起動は続きました。
+タスク スケジューラへの登録、OS の PAC 設定、`C:\Program Files` への配置は、確かめていません(NOT VERIFIED)。
+proxy は全 OS で build されます(`src/lib.rs` の `pub mod proxy;`)。
+
+| | A：Windows の中の proxy(勧める) | B：別の機械の proxy | C：Windows サービス(試験的) |
+|---|---|---|---|
+| 見張り役の置き場 | Windows の中。Linux も WSL も要らない | 同じ LAN の Linux か WSL | Windows の中 |
+| 宛先を止める | 止める。Windows の実機で `CONNECT` が `403` になった(条件は上) | 止める。Linux から `curl` で確かめた。Windows の proxy 設定を通した実走は NOT VERIFIED | 確かめられていない。切断に失敗すると `flows.jsonl` は `pass` のままで、接続は続く(PW-7 不通過。2026-10-04 の実機で `rc=87`) |
+| 通信の中身の検査(ウイルス検査)と能動防御 | 使えない。付けると `[warn]` を出して、その機能だけ無効のまま起動する | 使える(Linux 側で動かすとき) | 使えない |
+| 再起動のあと | タスク スケジューラが、ログオン時に起動する。実走は NOT VERIFIED | Windows の設定は残る。proxy 側は、Linux 側で見張り役を起動し直す | サービスは自動で上がる設計。実走は NOT VERIFIED(PW-8 未実施) |
+| 利用者が回す物 | なし | proxy 側の見張り役の起動 | pktmon の捕獲と変換(方法 C の手順 6)。回さない間は何も記録も遮断もしない |
+
+Windows 側の自動起動にあたるのは、A ではタスク スケジューラの登録、B では Windows の proxy 設定、C ではサービスの登録です。
+
+```
+A：Release から exe を落とす -> 置く -> proxy を起動 -> PAC の URL を入れる -> タスクで自動起動 -> 確かめる -> 外す
+B：Linux で見張り役を起動 -> Windows に PAC の URL を入れる -> 確かめる -> 外す
+C：exe を build -> 置く -> 登録 -> pktmon を回す -> 確かめる -> 外す
+```
+
+図の結論は、実行 file を Windows に置くのは A と C のときだけ、である。
+B の見張り役は Linux 側で動きます。
+
+### 実行 file(packetdeath.exe)を手に入れる
+
+配布用の実行 file は、GitHub の Release に置きます。
+最新の Release に `packetdeath-x86_64-windows.exe` が無いとき(一覧が空のとき)は、下の「自分で作る」を使います。
+
+1. ブラウザで <https://github.com/fukugan-ai/packetdeath/releases/latest> を開き、`packetdeath-x86_64-windows.exe` と `packetdeath-x86_64-windows.exe.sha256` を `Downloads` に保存する。
+2. PowerShell を開き、`Downloads` へ移る。
+
+   ```
+   cd "$HOME\Downloads"
+   ```
+
+3. 落とした file のハッシュ値(file の指紋)が、`.sha256` に書かれた値と同じかを比べる。
+   `.sha256` の中身は `<英数字 64 文字>  packetdeath-x86_64-windows.exe` の形です(2026-10-22 に確かめた)。
+   次の command は、同じなら `True`、違えば `False` を出す。
+   PowerShell の `-eq` は、大文字と小文字を区別しない。
+
+   ```
+   (Get-FileHash .\packetdeath-x86_64-windows.exe -Algorithm SHA256).Hash -eq ((Get-Content .\packetdeath-x86_64-windows.exe.sha256) -split ' ')[0]
+   ```
+
+4. `True` が出たら、名前を `packetdeath.exe` に変える。
+   `False` なら、使わずに消す。
+
+   ```
+   Rename-Item .\packetdeath-x86_64-windows.exe packetdeath.exe
+   ```
+
+初めて実行すると、Windows の SmartScreen(知らない実行 file を警告する仕組み)が警告を出すことがあります。
+出たら「詳細情報」を選び、出てくる「実行」を選びます。
+画面の文言は NOT VERIFIED です(Microsoft Learn の頁で文言を確かめられませんでした)。
+
+#### 自分で作る
+
+Linux か WSL で、自分で作ります。
+
+1. mingw-w64 の linker を確かめる。
+   `x86_64-w64-mingw32-gcc --version` が版を返せばよい。
+   無いときは、Debian と Ubuntu では `sudo apt install gcc-mingw-w64-x86-64` で入る(パッケージ名は NOT VERIFIED)。
+2. Windows 向けの標準ライブラリを足す。
+
+   ```
+   rustup target add x86_64-pc-windows-gnu
+   ```
+
+3. build する。
+
+   ```
+   cargo build --release --target x86_64-pc-windows-gnu
+   ```
+
+4. 出来上がりを確かめる。
+   `target/x86_64-pc-windows-gnu/release/packetdeath.exe` ができる。
+   `file` の出力に `PE32+ executable` が入っていればよい。
+
+   ```
+   file target/x86_64-pc-windows-gnu/release/packetdeath.exe
+   ```
+
+5. USB メモリや共有フォルダで、この file を Windows の `Downloads` へ渡す。
+
+### 方法 A：Windows の中で proxy を動かす
+
+手順 3 から 5 の起動、遮断、PAC の配信は、Windows の実機で確かめました(条件は、この節の冒頭に書いた)。
+手順 1 の `C:\Program Files` への配置、手順 5 の OS への PAC 設定、手順 6 のタスク スケジューラは、確かめていません(NOT VERIFIED)。
+
+Windows の proxy が使えるのは、SNI と宛先での遮断です。
+`--mitm-list`、`--ca-dir`、`--clamd`(通信の中身の検査)と、能動防御の option(`--distrust` など)は、Windows では無効になり、`[warn]` を出します(`src/main.rs` の `proxy` の起動)。
+
+1. 管理者の PowerShell を開き、実行 file を置き場へ移す。
+   手順は方法 C の手順 1 と 2 と同じ。
+2. 記録と一覧の置き場を作り、止める宛先を 1 行書く。
+   手順は方法 C の手順 3 と同じ。
+3. 見張り役を前面で起動する。
+   起動の行が出て、そのまま待つ。
+   止めるときは、その窓で `Ctrl+C` を押す。
+
+   ```
+   & 'C:\Program Files\packetdeath\packetdeath.exe' proxy --listen 127.0.0.1:8899 --blocklist 'C:\ProgramData\packetdeath\blocklist.txt' --deny 403 --log-dir 'C:\ProgramData\packetdeath'
+   ```
+
+   初めて起動すると、Windows Defender ファイアウォールが「許可しますか」と確認の窓を出すことがあります。
+   Microsoft Learn の文書では、許可の規則が無いアプリが初めて待ち受けるとき、確認の窓が出て、「いいえ」を選ぶか閉じると、遮断の規則ができます(取得 2026-10-22)。
+   `127.0.0.1`(この機械の中)だけで待つなら、許可は要らない見込みです。
+   窓が出るかと、遮断の規則が `127.0.0.1` の通信に効くかは、NOT VERIFIED です。
+   出たときは、ネットワークへの許可は付けません。
+4. 別の PowerShell の窓で、止める宛先へ接続する。
+   `403` で断たれる。
+
+   ```
+   curl.exe -sS -x http://127.0.0.1:8899 https://example.org/
+   ```
+
+   出力は `curl: (7) CONNECT tunnel failed, response 403` になる(Windows の `curl.exe` でのこの文言は NOT VERIFIED。実機では `CONNECT` が `403` になることを確かめた)。
+   一覧に載せていない普通のサイトが開くことも確かめる。
+   `200` が出ればよい。
+
+   ```
+   curl.exe -sS -o NUL -w '%{http_code}\n' -x http://127.0.0.1:8899 https://example.com/
+   ```
+
+   記録は `C:\ProgramData\packetdeath\flows.jsonl` に、通信 1 件につき 1 行で残る。
+   止めた宛先の行には `"decision":"block"` が、通した宛先の行には `"decision":"pass"` が入る。
+
+   ```
+   Get-Content 'C:\ProgramData\packetdeath\flows.jsonl' -Tail 4
+   ```
+
+5. Windows の proxy 設定に、自動設定の URL を入れる。
+   画面の辿り方は方法 B の手順 2 から 6 と同じで、スクリプト アドレスだけ `http://127.0.0.1:8899/proxy.pac` にする。
+   見張り役が `/proxy.pac` を配ることは、`curl` で確かめた(`PROXY 127.0.0.1:18899; DIRECT` を返した)。
+   Windows の設定がそれを読んで通信を回すかは、NOT VERIFIED です。
+6. ログオン時に自動で起動するよう、タスク スケジューラに登録する。
+   コマンド プロンプトを管理者で開いて打つ。
+   開き方は、スタートメニューで「cmd」を検索し、「管理者として実行」を選ぶ(画面の文言は NOT VERIFIED)。
+   PowerShell では引用符の扱いが変わるので使わない(NOT VERIFIED)。
+   `/sc onlogon` は、ユーザーがログオンするたびに実行する指定です。
+   `/tr` は実行する command で、パスを含めて 262 文字までです。
+
+   ```
+   schtasks /create /tn "packetdeath proxy" /sc onlogon /tr "\"C:\Program Files\packetdeath\packetdeath.exe\" proxy --listen 127.0.0.1:8899 --blocklist C:\ProgramData\packetdeath\blocklist.txt --deny 403 --log-dir C:\ProgramData\packetdeath"
+   ```
+
+   手順 3 の窓を `Ctrl+C` で止めてから、ログオンし直さずにすぐ起動するには、次を打つ。
+
+   ```
+   schtasks /run /tn "packetdeath proxy"
+   ```
+
+   `schtasks` の引数は Microsoft Learn の `schtasks create` の頁で確かめました(取得 2026-10-22)。
+   引用符の入れ子(`\"`)と、起動した見張り役の窓の見え方は NOT VERIFIED です。
+   ログオンする前の通信は、見張り役が居ないので止まりません。
+7. 手順 4 の `curl.exe` を打ち直し、ブラウザで一覧に載せた宛先が開かないことを確かめる。
+8. 外すときは、設定とタスクと置き場を消す。
+   最初に、手順 5 の画面で「セットアップ スクリプトを使う」をオフにして保存する。
+
+   ```
+   schtasks /end /tn "packetdeath proxy"
+   schtasks /delete /tn "packetdeath proxy" /f
+   Remove-Item -Recurse 'C:\Program Files\packetdeath'
+   Remove-Item -Recurse 'C:\ProgramData\packetdeath'
+   ```
+
+   最初の 2 行はコマンド プロンプトで、後の 2 行は管理者の PowerShell で打ちます。
+   見張り役が止まっても、自動設定は `DIRECT`(直接接続)へ倒れるので、通信は止まりません。
+
+### 方法 B：別の機械の proxy を使う
+
+proxy は、通信の中継役です。
+**自動設定の URL**(PAC)は、どの通信を中継役へ回すかを書いた小さな file の場所です。
+見張り役が `/proxy.pac` で配ります。
+
+1. Linux か WSL で見張り役を起動する。
+   `--listen` に、その機械の LAN の IP を指定する(IP は `hostname -I` で見える)。
+   WSL の場合は、Windows からその IP に届くかを確かめる(NOT VERIFIED)。
+
+   ```
+   ./target/release/packetdeath proxy --listen 192.0.2.10:8899 --blocklist pdtrial/blocklist.txt --deny 403 --log-dir pdtrial/log
+   ```
+
+   一覧と記録の置き場の作り方は「最短で試す」の手順 3 にあります。
+   再起動のあとも常駐させるには、この command を Linux 側で自動起動に登録します。
+   proxy 用の systemd の unit は同梱していません(`scripts/systemd/` にあるのは `block` 用の `packetdeath-block.service` と一覧取り込み用の 2 つです)。
+2. Windows 11 の「設定」を開く。
+3. 「ネットワークとインターネット」の「プロキシ」を選ぶ。
+4. 「セットアップ スクリプトを使う」の横の「セットアップ」を選ぶ。
+5. 「セットアップ スクリプトを使う」をオンにする。
+6. 「スクリプト アドレス」に `http://192.0.2.10:8899/proxy.pac` を入れて「保存」を選ぶ。
+
+画面の文言は、Microsoft サポートの文書に書かれた日本語に合わせています(取得 2026-10-22)。
+Windows の版で変わることがあり、実機の画面は NOT VERIFIED です。
+
+確かめ方は 2 つです。
+
+- ブラウザで、一覧に載せた宛先(例：`https://example.org/`)を開く。
+  開かずにエラーが出ればよい。
+- 一覧に載せていない普通のサイト(例：`https://example.com/`)を開く。
+  開けばよい。
+
+見張り役が止まっても、自動設定は `DIRECT`(直接接続)へ倒れるので、通信は止まりません。
+
+外すときは、手順 4 の画面で「セットアップ スクリプトを使う」をオフにして保存します。
+
+### 方法 C：Windows サービスとして登録する
+
+登録するだけでは何も止まりません。
+宛先を記録するには、利用者が pktmon で捕獲して pcapng に変換する作業を回し続ける必要があります。
+packetdeath は pktmon を起動しません(止め忘れの事故を避けるため)。
+接続を止められることは、PW-7 が不通過のため、確かめられていません。
+切断に失敗すると、通信は続き、`flows.jsonl` の `decision` は `pass` のままです。
+
+1. 管理者の PowerShell を開く。
+   スタートメニューで「PowerShell」を検索し、「管理者として実行」を選ぶ(画面の文言は NOT VERIFIED)。
+2. 実行 file を置き場へ移す。
+
+   ```
+   New-Item -ItemType Directory -Force 'C:\Program Files\packetdeath'
+   Copy-Item "$HOME\Downloads\packetdeath.exe" 'C:\Program Files\packetdeath\packetdeath.exe'
+   ```
+
+   置いてから登録するのは、サービスが登録する実行 file の場所が、登録を打った実行 file の場所そのものだからです。
+   `Downloads` から登録すると、その仮の場所が登録されます。
+3. 記録と一覧の置き場を作り、止める宛先を 1 行書く。
+
+   ```
+   New-Item -ItemType Directory -Force 'C:\ProgramData\packetdeath'
+   Set-Content -Path 'C:\ProgramData\packetdeath\blocklist.txt' -Value 'example.org' -Encoding ascii
+   ```
+
+4. サービスを登録する。
+   `--log-dir` は必須です。
+   `--pcapng` を渡さないと、サービスは何も記録も遮断もしません。
+
+   ```
+   & 'C:\Program Files\packetdeath\packetdeath.exe' service-install --log-dir 'C:\ProgramData\packetdeath' --pcapng 'C:\ProgramData\packetdeath\capture.pcapng' --blocklist 'C:\ProgramData\packetdeath\blocklist.txt'
+   ```
+
+   登録の種類は、自動起動の遅延あり(delayed-auto)、アカウントは LocalSystem です。
+   落ちたときは、5 秒、30 秒、60 秒の間隔で自動再起動し、24 時間たつと数え直します。
+5. サービスを起こして確かめる。
+   登録しただけでは起動しません(`service-install` に起動の呼び出しが無い)。
+
+   ```
+   Start-Service packetdeath
+   Get-Service packetdeath
+   ```
+
+   Microsoft の文書では、`Get-Service` は `Status`、`Name`、`DisplayName` の 3 列を出します。
+   `Status` が `Running` ならよい。
+   この service の行の実際の出力は NOT VERIFIED です。
+6. pktmon で捕獲し、pcapng に変換する。
+   Windows 標準の通信記録道具が **pktmon** です。
+   `.etl` は pktmon の記録の形式、`.pcapng` は packetdeath が読む形式です。
+
+   ```
+   pktmon filter add pd7 -t TCP -p 443
+   pktmon start --capture --comp nics --pkt-size 0 --flags 0x010 --file-name C:\ProgramData\packetdeath\capture.etl
+   ```
+
+   通信を起こしてから、止めて変換します。
+
+   ```
+   pktmon stop
+   pktmon etl2pcap C:\ProgramData\packetdeath\capture.etl --out C:\ProgramData\packetdeath\capture.pcapng
+   ```
+
+   サービスは `capture.pcapng` を約 0.3 秒ごとに見て、変わっていれば読み直します。
+   この捕獲と変換を自動で繰り返す仕組みは、同梱していません。
+   再起動のあとは、手順 6 を打ち直さない限り、サービスは何も記録しません。
+   pktmon の出力の文言は、設計文書でも未確認です(NOT VERIFIED)。
+7. 記録を読む。
+
+   ```
+   Get-Content 'C:\ProgramData\packetdeath\flows.jsonl' -Tail 5
+   ```
+
+   サービスの動作の記録は `C:\ProgramData\packetdeath\service.log` にあります。
+8. 後始末をする。
+   pktmon の捕獲は、止め忘れると記録の file が際限なく大きくなります。
+   `.etl` と `.pcapng` には、端末が繋いだ宛先が入っているので、消します。
+
+   ```
+   pktmon stop
+   pktmon filter remove
+   pktmon status
+   Remove-Item 'C:\ProgramData\packetdeath\capture.etl', 'C:\ProgramData\packetdeath\capture.pcapng'
+   ```
+
+9. サービスを外すときは、止めてから登録を消す。
+
+   ```
+   Stop-Service packetdeath
+   & 'C:\Program Files\packetdeath\packetdeath.exe' service-uninstall
+   Remove-Item -Recurse 'C:\Program Files\packetdeath'
+   Remove-Item -Recurse 'C:\ProgramData\packetdeath'
+   ```
+
+   サービスは追加の driver を入れないので、消すものは登録と、この 2 つの置き場だけです。
+   `C:\ProgramData\packetdeath` を消すと、記録も消えます。
 
 ## 詳細な動作
 
@@ -579,22 +897,10 @@ sudo iptables -S | grep -c 1808
 
 ### Windows で使うとき
 
-pktmon の捕獲は、止め忘れると記録の file が際限なく大きくなります。
-後始末を先に確認してから始めます。
-
-```
-pktmon stop
-pktmon filter remove
-pktmon status
-```
-
-捕獲した file(`.etl` と変換後の `.pcapng`)は消します。
-中身は、端末が繋いだ宛先を含みます。
-これらの出力の文言は、設計文書でも未確認なので、初めて打つときに確かめます(NOT VERIFIED)。
-
-Windows サービスを外すときは、`packetdeath service-uninstall` を打ちます。
+pktmon の後始末(`pktmon stop`、`pktmon filter remove`、`pktmon status`、捕獲した file の削除)と、サービスの外し方は、「Windows で使う」の節の方法 C の手順 8 と 9 にあります。
 サービスは、追加の driver を入れません。
 再起動後の自動起動は、実走を測っていません(NOT VERIFIED)。
+サービスが接続を切ることは、確かめられていません(PW-7 不通過)。
 
 ### 記録と鍵
 

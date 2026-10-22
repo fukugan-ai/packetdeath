@@ -8,6 +8,9 @@ The watcher compares the name of each destination with a list, and cuts only the
 It is not a browser extension, so it does not rewrite anything inside the browser.
 You can also point other devices in your home, such as an iPhone, at the same watcher.
 
+If you use Windows, read "Using it on Windows" first.
+It covers getting the executable, where to put it, auto-start, and removal, in order.
+
 ## What it can do (10 stages)
 
 packetdeath is built in stages.
@@ -82,7 +85,7 @@ There are three ways to put the watcher in place.
 |---|---|---|---|
 | `proxy` | A relay (**proxy**). You point the proxy setting of a browser or an iPhone at it | Not needed | Linux |
 | `block` | Uses a Linux kernel feature that hands traffic to a program (**nfqueue**). It sees traffic leaving the machine | Needed (root) | Linux |
-| Windows service | Reads the capture left by the Windows built-in capture tool (**pktmon**) and cuts established connections | Needed | Windows 11 |
+| Windows service | Designed to read the capture left by the Windows built-in capture tool (**pktmon**) and cut established connections. Recording has worked; cutting has not been confirmed (PW-7 did not pass) | Needed | Windows 11 (recording only) |
 
 ## What was checked, and the limits
 
@@ -144,7 +147,7 @@ Traffic goes through it only when you give `curl` the `-x` option.
 2. Fetch the repository and build it.
 
    ```
-   git clone <URL of this repository>
+   git clone https://github.com/fukugan-ai/packetdeath.git
    cd packetdeath
    cargo build --release
    ```
@@ -226,6 +229,321 @@ The lists that ship with the repository:
 | `allowlists/microsoft-required.txt` | Destinations Microsoft publishes as required for its services | Converted from Microsoft's public API |
 | `allowlists/pihole-common.txt` | The widely used Pi-hole "do not block" destinations | Converted from `anudeepND/whitelist` (the license follows the original; NOT VERIFIED, check the original's notice) |
 | `allowlists/user-named.txt` | Destinations a user asked for by name | Written by hand |
+
+## Using it on Windows
+
+In short: if you use Windows alone, method A (running the proxy inside Windows) is the one to use.
+If you have no WSL or Linux machine, choose A.
+If a Linux or WSL machine sits on the same LAN, method B (using the proxy of another machine) is also open to you.
+Method C (a Windows service) can record destinations, but it has not been shown to stop a connection (acceptance PW-7 did not pass).
+To stop traffic, use A or B.
+
+The start-up, blocking and PAC delivery of method A were checked on a real Windows machine (2026-10-22).
+The conditions were: administrator rights, the watcher listening on `127.0.0.1:18899`, the PAC fetched with `curl`, and no OS proxy setting entered.
+A run without administrator rights has not been checked (NOT VERIFIED).
+The results: `example.com` returned `200`, a `CONNECT` to `events.data.microsoft.com` returned `403`, and `/proxy.pac` returned `200` with the body `PROXY 127.0.0.1:18899; DIRECT`.
+Two `[warn]` lines about content inspection and active defense appeared, and the watcher kept running.
+Registering the Task Scheduler task, the OS PAC setting, and placing the file in `C:\Program Files` were not checked (NOT VERIFIED).
+The proxy is built for every OS (`pub mod proxy;` in `src/lib.rs`).
+
+| | A: proxy inside Windows (recommended) | B: proxy on another machine | C: Windows service (experimental) |
+|---|---|---|---|
+| Where the watcher runs | Inside Windows. No Linux or WSL needed | A Linux or WSL machine on the same LAN | Inside Windows |
+| Stopping a destination | It stops. On a real Windows machine a `CONNECT` returned `403` (conditions above) | It stops. Checked with `curl` from Linux. A real run through a Windows proxy setting is NOT VERIFIED | Not confirmed. If the cut fails, `flows.jsonl` stays `pass` and the connection continues (PW-7 did not pass; `rc=87` on a real machine on 2026-10-04) |
+| Inspecting content (virus scan) and active defense | Not available. If you pass the options, it prints a `[warn]` and starts with only that feature off | Available (when the watcher runs on Linux) | Not available |
+| After a reboot | Task Scheduler starts it at logon. A real run is NOT VERIFIED | The Windows setting stays. On the proxy side, start the watcher again on the Linux machine | The service is set to start by itself. A real run is NOT VERIFIED (PW-8 has not been run) |
+| What you have to keep running | Nothing | Starting the watcher on the proxy side | The pktmon capture and conversion (step 6 of method C). While you do not run it, nothing is recorded or stopped |
+
+On Windows, the counterpart of an auto-start is the Task Scheduler registration in A, the Windows proxy setting in B, and the service registration in C.
+
+```
+A: download the exe from the Release -> put it on Windows -> start the proxy -> enter the PAC URL -> auto-start by task -> check -> remove
+B: start the watcher on Linux -> enter the PAC URL in Windows -> check -> remove
+C: build the exe -> put it on Windows -> register -> run pktmon -> check -> remove
+```
+
+In short, you put an executable on Windows only for A and C.
+In B the watcher runs on the Linux side.
+
+### Getting the executable (packetdeath.exe)
+
+The prebuilt executable is published as a GitHub Release.
+If the latest Release has no `packetdeath-x86_64-windows.exe` (the list is empty), use "Building it yourself" below.
+
+1. In a browser, open <https://github.com/fukugan-ai/packetdeath/releases/latest> and save `packetdeath-x86_64-windows.exe` and `packetdeath-x86_64-windows.exe.sha256` to `Downloads`.
+2. Open PowerShell and go to `Downloads`.
+
+   ```
+   cd "$HOME\Downloads"
+   ```
+
+3. Compare the hash (the fingerprint of the file) of the downloaded file with the value written in the `.sha256` file.
+   The `.sha256` file holds `<64 letters and digits>  packetdeath-x86_64-windows.exe` (checked on 2026-10-22).
+   The command below prints `True` when they are the same and `False` when they differ.
+   PowerShell's `-eq` ignores the difference between upper and lower case.
+
+   ```
+   (Get-FileHash .\packetdeath-x86_64-windows.exe -Algorithm SHA256).Hash -eq ((Get-Content .\packetdeath-x86_64-windows.exe.sha256) -split ' ')[0]
+   ```
+
+4. If it prints `True`, rename the file to `packetdeath.exe`.
+   If it prints `False`, delete the file without running it.
+
+   ```
+   Rename-Item .\packetdeath-x86_64-windows.exe packetdeath.exe
+   ```
+
+The first time you run it, Windows SmartScreen (the feature that warns about unfamiliar executables) may show a warning.
+If it does, choose "More info", then "Run anyway".
+The wording on screen is NOT VERIFIED (the Microsoft Learn page that was read did not give it).
+
+#### Building it yourself
+
+Build it on Linux or WSL.
+
+1. Check for the mingw-w64 linker.
+   `x86_64-w64-mingw32-gcc --version` should print a version.
+   If it is missing, on Debian and Ubuntu `sudo apt install gcc-mingw-w64-x86-64` installs it (the package name is NOT VERIFIED).
+2. Add the Windows standard library.
+
+   ```
+   rustup target add x86_64-pc-windows-gnu
+   ```
+
+3. Build.
+
+   ```
+   cargo build --release --target x86_64-pc-windows-gnu
+   ```
+
+4. Check the result.
+   The build produces `target/x86_64-pc-windows-gnu/release/packetdeath.exe`.
+   The output of `file` should contain `PE32+ executable`.
+
+   ```
+   file target/x86_64-pc-windows-gnu/release/packetdeath.exe
+   ```
+
+5. Copy this file to the Windows `Downloads` folder, for example with a USB stick or a shared folder.
+
+### Method A: run the proxy inside Windows
+
+Steps 3 to 5 (start-up, blocking, PAC delivery) were checked on a real Windows machine; the conditions are written at the start of this section.
+Placing the file in `C:\Program Files` (step 1), entering the PAC setting in the OS (step 5) and the Task Scheduler (step 6) were not checked (NOT VERIFIED).
+
+On Windows the proxy can block by SNI and by destination.
+The options `--mitm-list`, `--ca-dir` and `--clamd` (inspecting content) and the active-defense options (such as `--distrust`) are turned off on Windows, and each prints a `[warn]` (the `proxy` start-up in `src/main.rs`).
+
+1. Open an administrator PowerShell and move the executable to its home.
+   The steps are the same as steps 1 and 2 of method C.
+2. Create the folder for logs and lists, and write one destination to stop.
+   The steps are the same as step 3 of method C.
+3. Start the watcher in the foreground.
+   It prints a startup line and keeps waiting.
+   To stop it, press `Ctrl+C` in that window.
+
+   ```
+   & 'C:\Program Files\packetdeath\packetdeath.exe' proxy --listen 127.0.0.1:8899 --blocklist 'C:\ProgramData\packetdeath\blocklist.txt' --deny 403 --log-dir 'C:\ProgramData\packetdeath'
+   ```
+
+   The first time, Windows Defender Firewall may show a window asking whether to allow it.
+   According to the Microsoft Learn documentation, when an app without an allow rule listens for the first time, a window appears, and answering "No" or closing it creates block rules (retrieved 2026-10-22).
+   If the watcher listens only on `127.0.0.1` (inside this machine), no allow rule should be needed.
+   Whether the window appears, and whether the block rules affect `127.0.0.1` traffic, are NOT VERIFIED.
+   If it appears, do not grant access to any network.
+4. In another PowerShell window, connect to the destination on the list.
+   The connection is cut with a `403`.
+
+   ```
+   curl.exe -sS -x http://127.0.0.1:8899 https://example.org/
+   ```
+
+   The output is `curl: (7) CONNECT tunnel failed, response 403` (this wording from `curl.exe` on Windows is NOT VERIFIED; on a real machine a `CONNECT` was confirmed to return `403`).
+   Also check that an ordinary site that is not on the list opens.
+   You want `200`.
+
+   ```
+   curl.exe -sS -o NUL -w '%{http_code}\n' -x http://127.0.0.1:8899 https://example.com/
+   ```
+
+   The log is `C:\ProgramData\packetdeath\flows.jsonl`, one line per connection.
+   A destination that was stopped has `"decision":"block"` in its line, and one that was let through has `"decision":"pass"`.
+
+   ```
+   Get-Content 'C:\ProgramData\packetdeath\flows.jsonl' -Tail 4
+   ```
+
+5. Enter an automatic proxy configuration URL in the Windows proxy settings.
+   The screens are the same as steps 2 to 6 of method B, and only the script address differs: `http://127.0.0.1:8899/proxy.pac`.
+   That the watcher serves `/proxy.pac` was checked with `curl` (it returned `PROXY 127.0.0.1:18899; DIRECT`).
+   Whether the Windows setting reads it and routes traffic accordingly is NOT VERIFIED.
+6. Register it in Task Scheduler so that it starts at logon.
+   Open Command Prompt as administrator and run the command there.
+   To open it, search for "cmd" in the Start menu and choose "Run as administrator" (the wording on screen is NOT VERIFIED).
+   Do not use PowerShell, because it may handle quotation marks differently (NOT VERIFIED).
+   `/sc onlogon` means "run every time a user logs on".
+   `/tr` is the command to run, at most 262 characters including the path.
+
+   ```
+   schtasks /create /tn "packetdeath proxy" /sc onlogon /tr "\"C:\Program Files\packetdeath\packetdeath.exe\" proxy --listen 127.0.0.1:8899 --blocklist C:\ProgramData\packetdeath\blocklist.txt --deny 403 --log-dir C:\ProgramData\packetdeath"
+   ```
+
+   Stop the window of step 3 with `Ctrl+C`, then start the task at once without logging on again.
+
+   ```
+   schtasks /run /tn "packetdeath proxy"
+   ```
+
+   The `schtasks` arguments were checked against the Microsoft Learn page for `schtasks create` (retrieved 2026-10-22).
+   The nested quotation marks (`\"`) and how the watcher's window looks once started are NOT VERIFIED.
+   Traffic before logon is not stopped, because the watcher is not running yet.
+7. Run the `curl.exe` command of step 4 again, and check in a browser that a destination on the list does not open.
+8. To remove it, delete the setting, the task and the folders.
+   First, turn "Use setup script" off in the screen of step 5 and save.
+
+   ```
+   schtasks /end /tn "packetdeath proxy"
+   schtasks /delete /tn "packetdeath proxy" /f
+   Remove-Item -Recurse 'C:\Program Files\packetdeath'
+   Remove-Item -Recurse 'C:\ProgramData\packetdeath'
+   ```
+
+   Run the first two lines in Command Prompt and the last two in an administrator PowerShell.
+   If the watcher stops, the automatic configuration falls back to `DIRECT` (a direct connection), so traffic does not stop.
+
+### Method B: use the proxy of another machine
+
+A proxy is a relay for your traffic.
+An **automatic proxy configuration URL** (PAC) is the location of a small file that says which traffic goes to the relay.
+The watcher serves it at `/proxy.pac`.
+
+1. Start the watcher on Linux or WSL.
+   Give `--listen` the LAN IP of that machine (`hostname -I` shows it).
+   With WSL, check that Windows can reach that IP (NOT VERIFIED).
+
+   ```
+   ./target/release/packetdeath proxy --listen 192.0.2.10:8899 --blocklist pdtrial/blocklist.txt --deny 403 --log-dir pdtrial/log
+   ```
+
+   Step 3 of the quick start shows how to make the list and the log folder.
+   To keep it running across reboots, register this command for automatic start on the Linux side.
+   No systemd unit for the proxy ships with the repository (`scripts/systemd/` holds `packetdeath-block.service` for `block` and two files for the list import).
+2. Open Windows 11 Settings.
+3. Choose "Network & internet", then "Proxy".
+4. Next to "Use setup script", choose "Set up".
+5. Turn on "Use setup script".
+6. Enter `http://192.0.2.10:8899/proxy.pac` as the script address and choose "Save".
+
+The labels follow the Microsoft support article (retrieved 2026-10-22).
+They can differ between Windows versions, and the screen on a real machine is NOT VERIFIED.
+
+Check it in two ways.
+
+- In a browser, open a destination that is on the list (for example `https://example.org/`).
+  It should fail to open and show an error.
+- Open an ordinary site that is not on the list (for example `https://example.com/`).
+  It should open.
+
+If the watcher stops, the automatic configuration falls back to `DIRECT` (a direct connection), so traffic does not stop.
+
+To remove it, turn "Use setup script" off in the screen of step 4 and save.
+
+### Method C: register it as a Windows service
+
+Registering alone stops nothing.
+To record destinations, you have to keep capturing with pktmon and converting to pcapng.
+packetdeath does not start pktmon (this avoids the accident of a forgotten capture).
+Whether it can stop a connection has not been confirmed, because PW-7 did not pass.
+If the cut fails, the traffic continues and the `decision` in `flows.jsonl` stays `pass`.
+
+1. Open an administrator PowerShell.
+   Search for "PowerShell" in the Start menu and choose "Run as administrator" (the wording on screen is NOT VERIFIED).
+2. Move the executable to its home.
+
+   ```
+   New-Item -ItemType Directory -Force 'C:\Program Files\packetdeath'
+   Copy-Item "$HOME\Downloads\packetdeath.exe" 'C:\Program Files\packetdeath\packetdeath.exe'
+   ```
+
+   Do this before registering, because the service registers the location of the very executable that ran the registration.
+   If you register from `Downloads`, that temporary location is what gets registered.
+3. Create the folder for logs and lists, and write one destination to stop.
+
+   ```
+   New-Item -ItemType Directory -Force 'C:\ProgramData\packetdeath'
+   Set-Content -Path 'C:\ProgramData\packetdeath\blocklist.txt' -Value 'example.org' -Encoding ascii
+   ```
+
+4. Register the service.
+   `--log-dir` is required.
+   Without `--pcapng`, the service neither records nor stops anything.
+
+   ```
+   & 'C:\Program Files\packetdeath\packetdeath.exe' service-install --log-dir 'C:\ProgramData\packetdeath' --pcapng 'C:\ProgramData\packetdeath\capture.pcapng' --blocklist 'C:\ProgramData\packetdeath\blocklist.txt'
+   ```
+
+   The start type is automatic with a delay (delayed-auto), and the account is LocalSystem.
+   After a crash it restarts after 5, 30 and 60 seconds, and the count resets after 24 hours.
+5. Start the service and check it.
+   Registering does not start it (`service-install` makes no start call).
+
+   ```
+   Start-Service packetdeath
+   Get-Service packetdeath
+   ```
+
+   According to Microsoft's documentation, `Get-Service` prints three columns: `Status`, `Name` and `DisplayName`.
+   You want `Running` in `Status`.
+   The actual output for this service is NOT VERIFIED.
+6. Capture with pktmon and convert to pcapng.
+   **pktmon** is the packet capture tool built into Windows.
+   `.etl` is the format of its capture, and `.pcapng` is the format packetdeath reads.
+
+   ```
+   pktmon filter add pd7 -t TCP -p 443
+   pktmon start --capture --comp nics --pkt-size 0 --flags 0x010 --file-name C:\ProgramData\packetdeath\capture.etl
+   ```
+
+   Make some traffic, then stop and convert.
+
+   ```
+   pktmon stop
+   pktmon etl2pcap C:\ProgramData\packetdeath\capture.etl --out C:\ProgramData\packetdeath\capture.pcapng
+   ```
+
+   The service looks at `capture.pcapng` about every 0.3 seconds and rereads it when it has changed.
+   Nothing that repeats the capture and conversion automatically ships with the repository.
+   After a reboot, the service records nothing until you run step 6 again.
+   The wording of pktmon's output is also unconfirmed in the design document (NOT VERIFIED).
+7. Read the log.
+
+   ```
+   Get-Content 'C:\ProgramData\packetdeath\flows.jsonl' -Tail 5
+   ```
+
+   The service's own log is `C:\ProgramData\packetdeath\service.log`.
+8. Clean up.
+   If you forget to stop a pktmon capture, the capture file grows without limit.
+   `.etl` and `.pcapng` hold the destinations your device connected to, so delete them.
+
+   ```
+   pktmon stop
+   pktmon filter remove
+   pktmon status
+   Remove-Item 'C:\ProgramData\packetdeath\capture.etl', 'C:\ProgramData\packetdeath\capture.pcapng'
+   ```
+
+9. To remove the service, stop it and then delete the registration.
+
+   ```
+   Stop-Service packetdeath
+   & 'C:\Program Files\packetdeath\packetdeath.exe' service-uninstall
+   Remove-Item -Recurse 'C:\Program Files\packetdeath'
+   Remove-Item -Recurse 'C:\ProgramData\packetdeath'
+   ```
+
+   The service installs no extra driver, so the registration and these two folders are all there is to remove.
+   Deleting `C:\ProgramData\packetdeath` deletes the logs too.
 
 ## Details
 
@@ -574,22 +892,10 @@ The `block` rules were not run again when this README was written (NOT VERIFIED)
 
 ### Using it on Windows
 
-If you forget to stop a pktmon capture, the capture file grows without limit.
-Confirm the cleanup first, then start.
-
-```
-pktmon stop
-pktmon filter remove
-pktmon status
-```
-
-Delete the captured files (`.etl` and the converted `.pcapng`).
-They contain every destination the device connected to.
-The exact output of these commands is also unconfirmed in the design document, so check it the first time you run them (NOT VERIFIED).
-
-To remove the Windows service, run `packetdeath service-uninstall`.
+The pktmon cleanup (`pktmon stop`, `pktmon filter remove`, `pktmon status`, deleting the captured files) and the removal of the service are in steps 8 and 9 of method C in "Using it on Windows".
 The service installs no extra driver.
 Automatic start after a reboot has not been tested on a real run (NOT VERIFIED).
+That the service cuts a connection has not been confirmed (PW-7 did not pass).
 
 ### Logs and keys
 
