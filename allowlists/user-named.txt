@@ -1,0 +1,14 @@
+# Destinations the operator named as "must never be blocked".
+#
+# Only entries that are in neither public list (microsoft-required.txt,
+# pihole-common.txt) belong here; do not duplicate them.
+#
+# Add an entry only when the operator names it. An entry added on a guess
+# opens a hole that lets ads through.
+
+# my.microsoftpersonalcontent.com serves OneDrive personal files. It is in
+# neither the Microsoft official API (endpoints.office.com) nor
+# anudeepND/whitelist (checked on 2026-09-11; the test
+# onedrive_personal_content_host_is_not_in_either_fetched_allowlist in
+# tests/independent_allowlist.rs pins this).
+microsoftpersonalcontent.com

@@ -1,0 +1,91 @@
+From 6e5bce0e965a688380166a0bef2fb706b2160ff0 Mon Sep 17 00:00:00 2001
+From: packetdeath <packetdeath@localhost>
+Date: Sun, 4 Oct 2026 07:17:40 +0900
+Subject: [PATCH 3/4] Compute tar sizes and ISO9660 block offsets in 64 bits
+
+A tar size field holds up to 8 GiB, so octal() and its callers use 64
+bits. The ISO9660 block lookup multiplies in size_t so a sector past
+4 GiB is addressed correctly.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ libclamav/iso9660.c |  6 +++---
+ libclamav/untar.c   | 19 ++++++++-----------
+ 2 files changed, 11 insertions(+), 14 deletions(-)
+
+diff --git a/libclamav/iso9660.c b/libclamav/iso9660.c
+index 24b1f48..05a6705 100644
+--- a/libclamav/iso9660.c
++++ b/libclamav/iso9660.c
+@@ -46,9 +46,9 @@ static const void *needblock(const iso9660_t *iso, unsigned int block, int temp)
+     size_t loff;
+     unsigned int blocks_per_sect = (2048 / iso->blocksz);
+     if (block > ((ctx->fmap->len - iso->base_offset) / iso->sectsz) * blocks_per_sect)
+-        return NULL;                                  /* Block is out of file */
+-    loff = (block / blocks_per_sect) * iso->sectsz;   /* logical sector */
+-    loff += (block % blocks_per_sect) * iso->blocksz; /* logical block within the sector */
++        return NULL;                                        /* Block is out of file */
++    loff = (size_t)(block / blocks_per_sect) * iso->sectsz; /* logical sector */
++    loff += (block % blocks_per_sect) * iso->blocksz;       /* logical block within the sector */
+     if (temp)
+         return fmap_need_off_once(ctx->fmap, iso->base_offset + loff, iso->blocksz);
+     return fmap_need_off(ctx->fmap, iso->base_offset + loff, iso->blocksz);
+diff --git a/libclamav/untar.c b/libclamav/untar.c
+index 500788b..7338c41 100644
+--- a/libclamav/untar.c
++++ b/libclamav/untar.c
+@@ -57,14 +57,15 @@
+ #define TARCHECKSUMLEN 8
+ #define TARFILETYPEOFFSET 156
+ 
+-static int
++/* A tar size field has 11 octal digits (up to 8 GiB), so it needs more than 32 bits. */
++static int64_t
+ octal(const char *str)
+ {
+-    int ret;
++    unsigned long long ret;
+ 
+-    if (sscanf(str, "%o", (unsigned int *)&ret) != 1)
++    if (sscanf(str, "%llo", &ret) != 1)
+         return -1;
+-    return ret;
++    return (int64_t)ret;
+ }
+ 
+ /**
+@@ -80,7 +81,7 @@ getchecksum(const char *header)
+ 
+     strncpy(ochecksum, header + TARCHECKSUMOFFSET, TARCHECKSUMLEN);
+     ochecksum[TARCHECKSUMLEN] = '\0';
+-    checksum                  = octal(ochecksum);
++    checksum                  = (int)octal(ochecksum); /* at most 8 octal digits */
+     return checksum;
+ }
+ 
+@@ -127,7 +128,7 @@ cl_error_t cli_untar(const char *dir, unsigned int posix, cli_ctx *ctx)
+ {
+     cl_error_t ret;
+     size_t size         = 0;
+-    int size_int        = 0;
++    int64_t size_int    = 0;
+     int fout            = -1;
+     int in_block        = 0;
+     int last_header_bad = 0;
+@@ -289,12 +290,8 @@ cl_error_t cli_untar(const char *dir, unsigned int posix, cli_ctx *ctx)
+             }
+ 
+             if (skipEntry) {
+-                const int nskip = (size % BLOCKSIZE || !size) ? size + BLOCKSIZE - (size % BLOCKSIZE) : size;
++                const size_t nskip = (size % BLOCKSIZE || !size) ? size + BLOCKSIZE - (size % BLOCKSIZE) : size;
+ 
+-                if (nskip < 0) {
+-                    cli_dbgmsg("cli_untar: got negative skip size, giving up\n");
+-                    return CL_CLEAN;
+-                }
+                 cli_dbgmsg("cli_untar: skipping entry\n");
+                 pos += nskip;
+                 continue;
+-- 
+2.53.0
+

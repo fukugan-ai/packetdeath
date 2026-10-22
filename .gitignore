@@ -1,0 +1,56 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# 🔴 CA の秘密鍵と証明書。1度でも commit したら、履歴から消えない。
+# この proxy は自分の端末の TLS を割る。ここに置く鍵が漏れたら、
+# その鍵を信頼している端末の通信をすべて割れる。
+*.pem
+*.key
+*.crt
+*.der
+*.p12
+*.pfx
+/ca/
+/certs/
+
+# フィルタリストは実行時に取得する。同梱しない（EasyList は GPLv3）
+/filters/
+*.txt.cache
+
+# 実行時の記録。トラフィックの中身が入りうる
+/logs/
+*.log
+*.pcap
+*.har
+# log dir を repo の中に向けたときの 3 本。flows は繋いだ domain、dns は応答、
+# av（段階8）は download ごとの宛先 IP と sha256 を含む。
+# 2026-10-03 実測：PK-40 の `git check-ignore flows.jsonl dns.jsonl` が 0 行だった（*.log は .jsonl に当たらない）
+flows.jsonl
+dns.jsonl
+av.jsonl
+# 段階10 の見張りの記録。src_ip と SNI を含む
+watch.jsonl
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 他人の著作物。再配布しない。取得先は docs/research/prior-art.md に書いてある
+/docs/research/*.pdf
+/docs/research/foci-ech.txt
+
+# 次の1手を持つ運用 file。絶対 path を書く規約なので個人環境情報が入る。
+# ローカルに在ればよく、履歴へ残す必要がない
+/state.json
+
+# test が作る作業 dir。commit に混ざらないようにする。
+# tests/independent_reload.rs:23 が CARGO_MANIFEST_DIR の下へ作る。
+# test 自身が消すが、落ちたときに残る。
+tests/tmp-*/
+
+# Claude Code が repo の中に作る物。context の退避は state.json の写し（絶対 path 入り）を含み、
+# worktree は規約で .claude/worktrees/ にだけ作る。どちらも履歴へ残さない
+/.claude/context-snapshots/
+/.claude/worktrees/

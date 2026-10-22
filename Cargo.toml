@@ -1,0 +1,70 @@
+[package]
+name = "packetdeath"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# flows.jsonl: one JSON object per flow, one line per object
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# ts の RFC 3339 整形。std だけでうるう年計算を安全に書くより実績のある crate を使う
+time = { version = "0.3", features = ["formatting"] }
+# IPv4/IPv6 + TCP ヘッダの切り出し。2026-07 も更新が続く純 Rust 実装で、
+# 生 byte を信じない安全な bounds-checked slicing API を持つ
+etherparse = "0.21"
+
+# nfqueue は Linux 専有の資源なので Linux target だけへ依存を絞る。
+# Windows cross build（PK-5）で不要な crate を巻き込まないため。
+[target.'cfg(target_os = "linux")'.dependencies]
+# MIT OR Apache-2.0。libnetfilter_queue（GPL-2.0）を経由せず netlink を直接叩く
+# 純 Rust 実装で、--queue-bypass 相当の set_fail_open を公開 API に持つ
+nfq = "0.2"
+# Stage 8 (MITM). docs/design.md "TLS の部品" fixes the crates, versions and
+# features: one crypto provider (aws-lc-rs) shared by rustls and rcgen, no
+# openssl, no tokio. Linux only, like nfq: the production proxy runs on Linux.
+rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "pem", "aws_lc_rs", "x509-parser"] }
+webpki-roots = "1"
+aws-lc-rs = "=1.18.1"
+# Stage 10 (active defense). Reads the SPKI, issuer and serial of the
+# certificates a server sends. Already in Cargo.lock through rcgen, so the
+# package count does not change.
+x509-parser = "=0.18.1"
+
+# サービス登録・起動時遅延・失敗時自動再起動（`sc create` 相当）専用。
+# MIT OR Apache-2.0。内部で Win32 API 呼び出しに `unsafe` を使うが、
+# packetdeath 側は safe な公開 API（`ServiceManager` / `Service` の
+# メソッド）しか呼ばない。`unsafe_code = "forbid"` は packetdeath 自身の
+# code に対する制約であり、依存 crate 内部の unsafe には及ばない
+# （2026-09-11 実測② ── `forbid` の下でも build が通ることを確認済み）。
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+# service.log timestamps carry the machine's local offset. Not in the Linux binary.
+time = { version = "0.3", features = ["local-offset"] }
+
+[lints.rust]
+# 🔴 `forbid` である。`deny` へ緩めない。
+#
+# unsafe は使わない。
+# `forbid` は `#[allow]` で上書きできないので、この1行が在る限り
+# この crate に unsafe は1行も入らない。
+#
+# Windows の接続遮断に要る `SetTcpEntry`（`iphlpapi.dll`）は `unsafe fn` だが、
+# **Rust から直接 呼ばない。**PowerShell 側で呼ぶ（`docs/design.md` の該当節）。
+# packetdeath は接続の4つ組を渡すだけで、FFI を持たない。
+#
+# 2026-09-11 実測 ── `forbid` の下で `unsafe { 1 }` を書くと
+# `error: usage of an unsafe block` で build が落ちることを確かめた。
+unsafe_code = "forbid"
+unused_mut = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

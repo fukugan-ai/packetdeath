@@ -1,0 +1,58 @@
+From 83ba259495a1d9d9b3bcf20d527829152c9309bd Mon Sep 17 00:00:00 2001
+From: packetdeath <packetdeath@localhost>
+Date: Sun, 4 Oct 2026 07:02:53 +0900
+Subject: [PATCH 1/4] Skip bytecode on files of 4 GiB or more
+
+---
+ libclamav/bytecode.c | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/libclamav/bytecode.c b/libclamav/bytecode.c
+index 467ba80..5d275a4 100644
+--- a/libclamav/bytecode.c
++++ b/libclamav/bytecode.c
+@@ -2809,6 +2809,21 @@ cl_error_t cli_bytecode_done(struct cli_all_bc *allbc)
+     return cli_bytecode_done_jit(allbc, 0);
+ }
+ 
++/*
++ * The bytecode API passes file sizes and offsets as 32-bit values, so a
++ * bytecode cannot describe a file of 4 GiB or more. Such files are not given
++ * to bytecode at all.
++ */
++static bool bytecode_skips_large_file(const fmap_t *map, const char *entry)
++{
++    if (map->len < ((size_t)1 << 32)) {
++        return false;
++    }
++    cli_warnmsg("%s: skipping bytecode for a file of %zu bytes (limit: 4 GiB; bytecode offsets are 32-bit)\n",
++                entry, map->len);
++    return true;
++}
++
+ cl_error_t cli_bytecode_context_setfile(struct cli_bc_ctx *ctx, fmap_t *map)
+ {
+     ctx->fmap           = map;
+@@ -2831,6 +2846,9 @@ cl_error_t cli_bytecode_runlsig(cli_ctx *cctx, struct cli_target_info *tinfo,
+     if (bc_idx == 0)
+         return CL_ENULLARG;
+ 
++    if (bytecode_skips_large_file(map, "cli_bytecode_runlsig"))
++        return CL_SUCCESS;
++
+     if (NULL != bc->lsig) {
+         bc_name = bc->lsig;
+     } else if (NULL != bc->hook_name) {
+@@ -2905,6 +2923,9 @@ cl_error_t cli_bytecode_runhook(cli_ctx *cctx, const struct cl_engine *engine, s
+     if (!cctx)
+         return CL_ENULLARG;
+ 
++    if (bytecode_skips_large_file(map, "cli_bytecode_runhook"))
++        return CL_CLEAN;
++
+     cli_dbgmsg("Bytecode executing hook id %u (%u hooks)\n", id, hooks_cnt);
+     /* restore match counts */
+     cli_bytecode_context_setfile(ctx, map);
+-- 
+2.53.0
+

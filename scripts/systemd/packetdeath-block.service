@@ -1,0 +1,35 @@
+# packetdeath block (IPS on NFQUEUE 1808).
+# This is a system unit. %h is the home directory of the user the system
+# manager runs as, which is /root, so the files below live in /root/pd.
+# Change the paths if the files live elsewhere.
+# Undo:
+#   sudo systemctl disable --now packetdeath-block
+#   sudo iptables -S | grep -- '--queue-num 1808' | sed 's/^-A/-D/' | xargs -L1 sudo iptables
+#   sudo rm /etc/systemd/system/packetdeath-block.service && sudo systemctl daemon-reload
+# The iptables rules carry --queue-bypass, so traffic passes untouched whenever
+# this process is not bound to the queue.
+# --ips-severity 1 drops the destination of every Suricata alert whose severity
+# is 1 (the most severe). Drop it from ExecStart to stop IDS-based blocking
+# without touching the blocklists.
+[Unit]
+Description=packetdeath block (NFQUEUE 1808, blocklists and Suricata eve alerts)
+After=network-online.target suricata.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/pd/bin/packetdeath block --queue 1808 \
+  --blocklist %h/pd/blocklist.txt \
+  --blocklist %h/pd/malware-domains.txt \
+  --iplist %h/pd/malware-ips.txt \
+  --allowlist %h/pd/allowlist.txt \
+  --dns \
+  --eve /var/log/suricata/eve.json \
+  --ips-severity 1 \
+  --log-dir %h/pd/log-block
+Restart=always
+RestartSec=5
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

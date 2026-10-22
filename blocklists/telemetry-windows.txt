@@ -1,0 +1,17 @@
+# Windows / Office / MSN の診断データ送信 blocklist。
+# 出所・止めない理由は blocklists/README.md を見よ。
+# 実測: 実機 Windows 11 の flows.jsonl（3776行）を
+# 走査して得た Microsoft 系 SNI から選んだ6行。
+# 同じ実機の log を対象に、この6行が「止めたい7件」を全部 当て
+# 「止めてはいけない7件」を1件も当てないことを、
+# tests/independent_telemetry_blocklist.rs が
+# Blocklist::load 経由で確認する。
+events.data.microsoft.com
+settings-win.data.microsoft.com
+ecs.office.com
+events.data.msn.com
+# 🔴 assets.msn.com は入れない。入れると実機で2件 落ちる。
+#    MSN のウィジェットや Edge の新しいタブの中身を配る経路であり、
+#    止めると表示が壊れる。診断データ送信ではない。
+# assets.msn.com
+tsfe.trafficshaping.dsp.mp.microsoft.com

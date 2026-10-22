@@ -1,0 +1,987 @@
+From 50fde3e2b2dae7074efc2032b12599fce01f3b9a Mon Sep 17 00:00:00 2001
+From: packetdeath <packetdeath@localhost>
+Date: Sun, 4 Oct 2026 07:16:42 +0900
+Subject: [PATCH 2/4] Widen scan offsets to size_t
+
+File positions are size_t; chunk lengths stay 32-bit. CLI_OFF_ANY and
+CLI_OFF_NONE become SIZE_MAX and SIZE_MAX - 1 so a real offset below
+4 GiB cannot collide with them. Container metadata keeps its 32-bit
+"any" value in CLI_CDB_ANY. The bytecode API still receives 32-bit
+offsets, narrowed one by one with the "not matched" marker unchanged.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ libclamav/bytecode.c          | 32 ++++++++--------
+ libclamav/matcher-ac.c        | 71 ++++++++++++++++++-----------------
+ libclamav/matcher-ac.h        | 16 ++++----
+ libclamav/matcher-bm.c        | 53 ++++++++++++++++----------
+ libclamav/matcher-bm.h        |  7 ++--
+ libclamav/matcher-byte-comp.c |  2 +-
+ libclamav/matcher-pcre.c      | 33 ++++++++--------
+ libclamav/matcher-pcre.h      |  6 +--
+ libclamav/matcher.c           | 40 ++++++++++++++------
+ libclamav/matcher.h           | 10 +++--
+ libclamav/readdb.c            | 10 ++---
+ libclamav/scanners.c          |  3 +-
+ libclamav/yara_exec.c         | 12 +++---
+ 13 files changed, 168 insertions(+), 127 deletions(-)
+
+diff --git a/libclamav/bytecode.c b/libclamav/bytecode.c
+index 5d275a4..4aef39b 100644
+--- a/libclamav/bytecode.c
++++ b/libclamav/bytecode.c
+@@ -63,22 +63,22 @@ static const uint32_t nomatch[64] = {
+     0, 0, 0, 0, 0, 0, 0, 0,
+     0, 0, 0, 0, 0, 0, 0, 0};
+ static const uint32_t nooffsets[64] = {
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE,
+-    CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE, CLI_OFF_NONE};
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU,
++    0xfffffffeU, 0xfffffffeU, 0xfffffffeU, 0xfffffffeU};
+ 
+ static const uint16_t nokind;
+ static const uint32_t nofilesize;
+diff --git a/libclamav/matcher-ac.c b/libclamav/matcher-ac.c
+index 7f05eab..7bd0c74 100644
+--- a/libclamav/matcher-ac.c
++++ b/libclamav/matcher-ac.c
+@@ -1014,11 +1014,11 @@ int cli_ac_chklsig(const char *expr, const char *end, uint32_t *lsigcnt, unsigne
+     }
+ }
+ 
+-inline static int ac_findmatch_special(const unsigned char *buffer, uint32_t offset, uint32_t bp, uint32_t fileoffset, uint32_t length,
++inline static int ac_findmatch_special(const unsigned char *buffer, uint32_t offset, uint32_t bp, size_t fileoffset, uint32_t length,
+                                        const struct cli_ac_patt *pattern, uint32_t pp, uint16_t specialcnt, uint32_t *start, uint32_t *end, int rev);
+-static int ac_backward_match_branch(const unsigned char *buffer, uint32_t bp, uint32_t offset, uint32_t length, uint32_t fileoffset,
++static int ac_backward_match_branch(const unsigned char *buffer, uint32_t bp, uint32_t offset, size_t fileoffset, uint32_t length,
+                                     const struct cli_ac_patt *pattern, uint32_t pp, uint16_t specialcnt, uint32_t *start, uint32_t *end);
+-static int ac_forward_match_branch(const unsigned char *buffer, uint32_t bp, uint32_t offset, uint32_t length, uint32_t fileoffset,
++static int ac_forward_match_branch(const unsigned char *buffer, uint32_t bp, uint32_t offset, size_t fileoffset, uint32_t length,
+                                    const struct cli_ac_patt *pattern, uint32_t pp, uint16_t specialcnt, uint32_t *start, uint32_t *end);
+ 
+ /* call only by ac_findmatch_special! Does not handle recursive specials */
+@@ -1100,7 +1100,7 @@ static int ac_forward_match_branch(const unsigned char *buffer, uint32_t bp, uin
+     }
+ 
+ /* special handler */
+-inline static int ac_findmatch_special(const unsigned char *buffer, uint32_t offset, uint32_t bp, uint32_t fileoffset, uint32_t length,
++inline static int ac_findmatch_special(const unsigned char *buffer, uint32_t offset, uint32_t bp, size_t fileoffset, uint32_t length,
+                                        const struct cli_ac_patt *pattern, uint32_t pp, uint16_t specialcnt, uint32_t *start, uint32_t *end, int rev)
+ {
+     int match, cmp;
+@@ -1216,12 +1216,12 @@ inline static int ac_findmatch_special(const unsigned char *buffer, uint32_t off
+ 
+ /* state should reset on call, recursion depth = number of alternate specials */
+ /* each loop iteration starts on the NEXT sequence to be validated */
+-static int ac_backward_match_branch(const unsigned char *buffer, uint32_t bp, uint32_t offset, uint32_t fileoffset, uint32_t length,
++static int ac_backward_match_branch(const unsigned char *buffer, uint32_t bp, uint32_t offset, size_t fileoffset, uint32_t length,
+                                     const struct cli_ac_patt *pattern, uint32_t pp, uint16_t specialcnt, uint32_t *start, uint32_t *end)
+ {
+     int match = 0;
+     uint16_t wc, i;
+-    uint32_t filestart;
++    size_t filestart;
+ 
+     /* backwards (prefix) validation, determines start */
+     if (pattern->prefix && pattern->prefix_length[0]) {
+@@ -1308,7 +1308,7 @@ static int ac_backward_match_branch(const unsigned char *buffer, uint32_t bp, ui
+ 
+ /* state should reset on call, recursion depth = number of alternate specials */
+ /* each loop iteration starts on the NEXT sequence to validate */
+-static int ac_forward_match_branch(const unsigned char *buffer, uint32_t bp, uint32_t offset, uint32_t fileoffset, uint32_t length,
++static int ac_forward_match_branch(const unsigned char *buffer, uint32_t bp, uint32_t offset, size_t fileoffset, uint32_t length,
+                                    const struct cli_ac_patt *pattern, uint32_t pp, uint16_t specialcnt, uint32_t *start, uint32_t *end)
+ {
+     int match;
+@@ -1384,7 +1384,7 @@ static int ac_forward_match_branch(const unsigned char *buffer, uint32_t bp, uin
+     return ac_backward_match_branch(buffer, offset - 1, offset, fileoffset, length, pattern, pattern->prefix_length[0] - 1, pattern->special_pattern - 1, start, end);
+ }
+ 
+-inline static int ac_findmatch(const unsigned char *buffer, uint32_t offset, uint32_t fileoffset, uint32_t length, const struct cli_ac_patt *pattern, uint32_t *start, uint32_t *end)
++inline static int ac_findmatch(const unsigned char *buffer, uint32_t offset, size_t fileoffset, uint32_t length, const struct cli_ac_patt *pattern, uint32_t *start, uint32_t *end)
+ {
+     int match;
+     uint16_t specialcnt = pattern->special_pattern;
+@@ -1413,7 +1413,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
+ 
+     data->reloffsigs = reloffsigs;
+     if (reloffsigs) {
+-        data->offset = (uint32_t *)malloc(reloffsigs * 2 * sizeof(uint32_t));
++        data->offset = (size_t *)malloc(reloffsigs * 2 * sizeof(size_t));
+         if (!data->offset) {
+             cli_errmsg("cli_ac_init: Can't allocate memory for data->offset\n");
+             return CL_EMEM;
+@@ -1424,7 +1424,7 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
+ 
+     data->partsigs = partsigs;
+     if (partsigs) {
+-        data->offmatrix = (uint32_t ***)calloc(partsigs, sizeof(uint32_t **));
++        data->offmatrix = (size_t ***)calloc(partsigs, sizeof(size_t **));
+         if (!data->offmatrix) {
+             cli_errmsg("cli_ac_init: Can't allocate memory for data->offmatrix\n");
+ 
+@@ -1489,8 +1489,8 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
+             cli_errmsg("cli_ac_init: Can't allocate memory for data->lsig_matches\n");
+             return CL_EMEM;
+         }
+-        data->lsigsuboff_last  = (uint32_t **)malloc(lsigs * sizeof(uint32_t *));
+-        data->lsigsuboff_first = (uint32_t **)malloc(lsigs * sizeof(uint32_t *));
++        data->lsigsuboff_last  = (size_t **)malloc(lsigs * sizeof(size_t *));
++        data->lsigsuboff_first = (size_t **)malloc(lsigs * sizeof(size_t *));
+         if (!data->lsigsuboff_last || !data->lsigsuboff_first) {
+             free(data->lsig_matches);
+             free(data->lsigsuboff_last);
+@@ -1507,8 +1507,8 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
+             cli_errmsg("cli_ac_init: Can't allocate memory for data->lsigsuboff_(last|first)\n");
+             return CL_EMEM;
+         }
+-        data->lsigsuboff_last[0]  = (uint32_t *)calloc(lsigs * 64, sizeof(uint32_t));
+-        data->lsigsuboff_first[0] = (uint32_t *)calloc(lsigs * 64, sizeof(uint32_t));
++        data->lsigsuboff_last[0]  = (size_t *)calloc(lsigs * 64, sizeof(size_t));
++        data->lsigsuboff_first[0] = (size_t *)calloc(lsigs * 64, sizeof(size_t));
+         if (!data->lsigsuboff_last[0] || !data->lsigsuboff_first[0]) {
+             free(data->lsig_matches);
+             free(data->lsigsuboff_last[0]);
+@@ -1564,7 +1564,7 @@ cl_error_t cli_ac_caloff(const struct cli_matcher *root, struct cli_ac_data *dat
+         } else if (CL_SUCCESS != (ret = cli_caloff(NULL, info, root->type, patt->offdata, &data->offset[patt->offset_min], &data->offset[patt->offset_max]))) {
+             cli_errmsg("cli_ac_caloff: Can't calculate relative offset in signature for %s\n", patt->virname);
+             return ret;
+-        } else if ((data->offset[patt->offset_min] != CLI_OFF_NONE) && (data->offset[patt->offset_min] + patt->length[1] > info->fsize)) {
++        } else if ((data->offset[patt->offset_min] != CLI_OFF_NONE) && (data->offset[patt->offset_min] + patt->length[1] > (size_t)info->fsize)) {
+             data->offset[patt->offset_min] = CLI_OFF_NONE;
+         }
+     }
+@@ -1677,7 +1677,7 @@ void lsig_increment_subsig_match(struct cli_ac_data *mdata, uint32_t lsig_id, ui
+     mdata->lsigcnt[lsig_id][subsig_id]++;
+ }
+ 
+-cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *mdata, uint32_t lsig_id, uint32_t subsig_id, uint32_t realoff, int partial)
++cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *mdata, uint32_t lsig_id, uint32_t subsig_id, size_t realoff, int partial)
+ {
+     const struct cli_ac_lsig *ac_lsig = root->ac_lsigtable[lsig_id];
+     const struct cli_lsig_tdb *tdb    = &ac_lsig->tdb;
+@@ -1714,7 +1714,7 @@ cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *
+             struct cli_subsig_matches *ss_matches;
+             struct cli_lsig_matches *ls_matches;
+ 
+-            cli_dbgmsg("lsig_sub_matched lsig %u:%u at %u\n", lsig_id, subsig_id, realoff);
++            cli_dbgmsg("lsig_sub_matched lsig %u:%u at %zu\n", lsig_id, subsig_id, realoff);
+ 
+             ls_matches = mdata->lsig_matches[lsig_id];
+             if (ls_matches == NULL) { /* allocate cli_lsig_matches */
+@@ -1734,15 +1734,15 @@ cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *
+                     return CL_EMEM;
+                 }
+                 ss_matches->next = 0;
+-                ss_matches->last = sizeof(ss_matches->offsets) / sizeof(uint32_t) - 1;
++                ss_matches->last = sizeof(ss_matches->offsets) / sizeof(size_t) - 1;
+             }
+             if (ss_matches->next > ss_matches->last) { /* cli_matches out of space? realloc */
+-                ss_matches = ls_matches->matches[subsig_id] = realloc(ss_matches, sizeof(struct cli_subsig_matches) + sizeof(uint32_t) * ss_matches->last * 2);
++                ss_matches = ls_matches->matches[subsig_id] = realloc(ss_matches, sizeof(struct cli_subsig_matches) + sizeof(size_t) * ss_matches->last * 2);
+                 if (ss_matches == NULL) {
+                     cli_errmsg("lsig_sub_matched: realloc failed for cli_subsig_matches struct\n");
+                     return CL_EMEM;
+                 }
+-                ss_matches->last = sizeof(ss_matches->offsets) / sizeof(uint32_t) + ss_matches->last * 2 - 1;
++                ss_matches->last = sizeof(ss_matches->offsets) / sizeof(size_t) + ss_matches->last * 2 - 1;
+             }
+ 
+             ss_matches->offsets[ss_matches->next] = realoff; /* finally, store the offset */
+@@ -1760,7 +1760,8 @@ cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *
+          * This check is only done after the 1st match.
+          */
+         const struct cli_ac_patt *macropt;
+-        uint32_t id, last_macro_match, smin, smax, macro_group_id, last_macroprev_match;
++        uint32_t id, smin, smax, macro_group_id;
++        size_t last_macro_match, last_macroprev_match;
+ 
+         /*
+          * Look up the subsig for the upcoming macro to get anchor-min/max, and macro group id.
+@@ -1789,7 +1790,7 @@ cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *
+             mdata->lsigsuboff_last[lsig_id][subsig_id] = realoff;
+         } else {
+             /* mark the macro sig itself matched */
+-            cli_dbgmsg("Checking macro match: %u + (%u - %u) == %u\n",
++            cli_dbgmsg("Checking macro match: %zu + (%u - %u) == %zu\n",
+                        last_macroprev_match, smin, smax, last_macro_match);
+ 
+             mdata->lsigcnt[lsig_id][subsig_id + 1]++;
+@@ -1824,7 +1825,7 @@ cl_error_t cli_ac_scanbuff(
+     struct cli_ac_result **res,
+     const struct cli_matcher *root,
+     struct cli_ac_data *mdata,
+-    uint32_t offset,
++    size_t offset,
+     cli_file_t ftype,
+     struct cli_matched_type **ftoffset,
+     unsigned int mode,
+@@ -1833,10 +1834,11 @@ cl_error_t cli_ac_scanbuff(
+     struct cli_ac_node *current;
+     struct cli_ac_list *pattN, *ptN;
+     struct cli_ac_patt *patt, *pt;
+-    uint32_t i, bp, exptoff[2], realoff, matchstart, matchend;
++    uint32_t i, bp, matchstart, matchend;
++    size_t exptoff[2], realoff;
+     uint16_t j;
+     uint8_t found, viruses_found = 0;
+-    uint32_t **offmatrix, swp;
++    size_t **offmatrix, swp;
+     cli_file_t type = CL_TYPE_ANY;
+     struct cli_ac_result *newres;
+     cl_error_t rc;
+@@ -1900,11 +1902,12 @@ cl_error_t cli_ac_scanbuff(
+ 
+                         realoff = offset + matchstart;
+                         if (pt->offdata[0] == CLI_OFF_VERSION) {
+-                            if (false == cli_hashset_contains_maybe_noalloc(mdata->vinfo, realoff)) {
++                            /* version-info offsets are 32-bit PE offsets */
++                            if (realoff > UINT32_MAX || false == cli_hashset_contains_maybe_noalloc(mdata->vinfo, (uint32_t)realoff)) {
+                                 ptN = ptN->next_same;
+                                 continue;
+                             }
+-                            cli_dbgmsg("cli_ac_scanbuff: VI match for offset %x\n", realoff);
++                            cli_dbgmsg("cli_ac_scanbuff: VI match for offset %zx\n", realoff);
+                         } else if (pt->offdata[0] == CLI_OFF_MACRO) {
+                             mdata->macro_lastmatch[patt->offdata[1]] = realoff;
+                             ptN                                      = ptN->next_same;
+@@ -1940,20 +1943,20 @@ cl_error_t cli_ac_scanbuff(
+ 
+                             /* sparsely populated matrix, so allocate and initialize if NULL */
+                             if (!mdata->offmatrix[pt->sigid - 1]) {
+-                                mdata->offmatrix[pt->sigid - 1] = malloc(pt->parts * sizeof(int32_t *));
++                                mdata->offmatrix[pt->sigid - 1] = malloc(pt->parts * sizeof(size_t *));
+                                 if (!mdata->offmatrix[pt->sigid - 1]) {
+                                     cli_errmsg("cli_ac_scanbuff: Can't allocate memory for mdata->offmatrix[%u]\n", pt->sigid - 1);
+                                     return CL_EMEM;
+                                 }
+ 
+-                                mdata->offmatrix[pt->sigid - 1][0] = malloc(pt->parts * (CLI_DEFAULT_AC_TRACKLEN + 2) * sizeof(uint32_t));
++                                mdata->offmatrix[pt->sigid - 1][0] = malloc(pt->parts * (CLI_DEFAULT_AC_TRACKLEN + 2) * sizeof(size_t));
+                                 if (!mdata->offmatrix[pt->sigid - 1][0]) {
+                                     cli_errmsg("cli_ac_scanbuff: Can't allocate memory for mdata->offmatrix[%u][0]\n", pt->sigid - 1);
+                                     free(mdata->offmatrix[pt->sigid - 1]);
+                                     mdata->offmatrix[pt->sigid - 1] = NULL;
+                                     return CL_EMEM;
+                                 }
+-                                memset(mdata->offmatrix[pt->sigid - 1][0], (uint32_t)-1, pt->parts * (CLI_DEFAULT_AC_TRACKLEN + 2) * sizeof(uint32_t));
++                                memset(mdata->offmatrix[pt->sigid - 1][0], 0xff, pt->parts * (CLI_DEFAULT_AC_TRACKLEN + 2) * sizeof(size_t));
+                                 mdata->offmatrix[pt->sigid - 1][0][0] = 0;
+                                 for (j = 1; j < pt->parts; j++) {
+                                     mdata->offmatrix[pt->sigid - 1][j]    = mdata->offmatrix[pt->sigid - 1][0] + j * (CLI_DEFAULT_AC_TRACKLEN + 2);
+@@ -1964,7 +1967,7 @@ cl_error_t cli_ac_scanbuff(
+ 
+                             found = 0;
+                             if (pt->partno != 1) {
+-                                for (j = 1; (j <= CLI_DEFAULT_AC_TRACKLEN + 1) && (offmatrix[pt->partno - 2][j] != (uint32_t)-1); j++) {
++                                for (j = 1; (j <= CLI_DEFAULT_AC_TRACKLEN + 1) && (offmatrix[pt->partno - 2][j] != SIZE_MAX); j++) {
+                                     found = j;
+                                     if (realoff < offmatrix[pt->partno - 2][j])
+                                         found = 0;
+@@ -2065,7 +2068,7 @@ cl_error_t cli_ac_scanbuff(
+                                                  * it may happen it is not
+                                                  * Until we're certain and can fix this, we add all offsets in the list.
+                                                  */
+-                                                for (j = 1; j <= CLI_DEFAULT_AC_TRACKLEN + 1 && offmatrix[0][j] != (uint32_t)-1; j++) {
++                                                for (j = 1; j <= CLI_DEFAULT_AC_TRACKLEN + 1 && offmatrix[0][j] != SIZE_MAX; j++) {
+                                                     ret = ac_addtype(ftoffset, type, offmatrix[pt->parts - 1][j], ctx);
+                                                     if (CL_SUCCESS != ret) {
+                                                         return ret;
+@@ -2074,7 +2077,7 @@ cl_error_t cli_ac_scanbuff(
+                                             }
+                                         }
+ 
+-                                        memset(offmatrix[0], (uint32_t)-1, pt->parts * (CLI_DEFAULT_AC_TRACKLEN + 2) * sizeof(uint32_t));
++                                        memset(offmatrix[0], 0xff, pt->parts * (CLI_DEFAULT_AC_TRACKLEN + 2) * sizeof(size_t));
+                                         for (j = 0; j < pt->parts; j++)
+                                             offmatrix[j][0] = 0;
+                                     }
+@@ -2129,7 +2132,7 @@ cl_error_t cli_ac_scanbuff(
+                                 if ((pt->type > type || pt->type >= CL_TYPE_SFX || pt->type == CL_TYPE_MSEXE) &&
+                                     (pt->rtype == CL_TYPE_ANY || ftype == pt->rtype)) {
+ 
+-                                    cli_dbgmsg("Matched signature for file type %s at %u\n", pt->virname, realoff);
++                                    cli_dbgmsg("Matched signature for file type %s at %zu\n", pt->virname, realoff);
+                                     type = pt->type;
+ 
+                                     if (ftoffset != NULL) {
+diff --git a/libclamav/matcher-ac.h b/libclamav/matcher-ac.h
+index 9b9d898..a6fcb39 100644
+--- a/libclamav/matcher-ac.h
++++ b/libclamav/matcher-ac.h
+@@ -48,7 +48,7 @@
+ struct cli_subsig_matches {
+     uint32_t last;
+     uint32_t next;
+-    uint32_t offsets[16]; /* offsets[] is variable length */
++    size_t offsets[16]; /* offsets[] is variable length */
+ };
+ 
+ struct cli_lsig_matches {
+@@ -57,14 +57,14 @@ struct cli_lsig_matches {
+ };
+ 
+ typedef struct cli_ac_data {
+-    uint32_t ***offmatrix;
++    size_t ***offmatrix;
+     uint32_t partsigs, lsigs, reloffsigs;
+     uint32_t **lsigcnt;
+-    uint32_t **lsigsuboff_last, **lsigsuboff_first;
++    size_t **lsigsuboff_last, **lsigsuboff_first;
+     struct cli_lsig_matches **lsig_matches;
+     uint8_t *yr_matches;
+-    uint32_t *offset;
+-    uint32_t macro_lastmatch[32];
++    size_t *offset;
++    size_t macro_lastmatch[32];
+     /** Hashset for versioninfo matching */
+     const struct cli_hashset *vinfo;
+     uint32_t min_partno;
+@@ -100,7 +100,7 @@ struct cli_ac_patt {
+     uint16_t parts, partno, special, special_pattern;
+     struct cli_ac_special **special_table;
+     uint16_t rtype, type;
+-    uint32_t offdata[4], offset_min, offset_max;
++    size_t offdata[4], offset_min, offset_max;
+     uint32_t boundary;
+     uint8_t depth;
+     uint8_t sigopts;
+@@ -162,12 +162,12 @@ cl_error_t cli_ac_initdata(struct cli_ac_data *data, uint32_t partsigs, uint32_t
+  * @param partial   0 if whole pattern, or >0 for a partial-patterns. That is one split with wildcards like * or {n-m}.
+  * @return cl_error_t
+  */
+-cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *mdata, uint32_t lsig_id, uint32_t subsig_id, uint32_t realoff, int partial);
++cl_error_t lsig_sub_matched(const struct cli_matcher *root, struct cli_ac_data *mdata, uint32_t lsig_id, uint32_t subsig_id, size_t realoff, int partial);
+ 
+ cl_error_t cli_ac_chkmacro(struct cli_matcher *root, struct cli_ac_data *data, unsigned lsigid1);
+ int cli_ac_chklsig(const char *expr, const char *end, uint32_t *lsigcnt, unsigned int *cnt, uint64_t *ids, unsigned int parse_only);
+ void cli_ac_freedata(struct cli_ac_data *data);
+-cl_error_t cli_ac_scanbuff(const unsigned char *buffer, uint32_t length, const char **virname, void **customdata, struct cli_ac_result **res, const struct cli_matcher *root, struct cli_ac_data *mdata, uint32_t offset, cli_file_t ftype, struct cli_matched_type **ftoffset, unsigned int mode, cli_ctx *ctx);
++cl_error_t cli_ac_scanbuff(const unsigned char *buffer, uint32_t length, const char **virname, void **customdata, struct cli_ac_result **res, const struct cli_matcher *root, struct cli_ac_data *mdata, size_t offset, cli_file_t ftype, struct cli_matched_type **ftoffset, unsigned int mode, cli_ctx *ctx);
+ cl_error_t cli_ac_buildtrie(struct cli_matcher *root);
+ cl_error_t cli_ac_init(struct cli_matcher *root, uint8_t mindepth, uint8_t maxdepth, uint8_t dconf_prefiltering);
+ cl_error_t cli_ac_caloff(const struct cli_matcher *root, struct cli_ac_data *data, const struct cli_target_info *info);
+diff --git a/libclamav/matcher-bm.c b/libclamav/matcher-bm.c
+index 7d02978..ab4a772 100644
+--- a/libclamav/matcher-bm.c
++++ b/libclamav/matcher-bm.c
+@@ -40,6 +40,20 @@
+ #define BM_BLOCK_SIZE 3
+ #define HASH(a, b, c) (211 * a + 37 * b + c)
+ 
++static int cmp_offtab(const void *a, const void *b)
++{
++    const size_t x = *(const size_t *)a;
++    const size_t y = *(const size_t *)b;
++
++    return (x > y) - (x < y);
++}
++
++/* Advance the buffer index by a file-offset distance; a distance past the buffer ends the scan. */
++static uint32_t bm_skip(uint32_t i, size_t delta, uint32_t length)
++{
++    return (delta >= length) ? length : i + (uint32_t)delta;
++}
++
+ cl_error_t cli_bm_addpatt(struct cli_matcher *root, struct cli_bm_patt *pattern, const char *offset)
+ {
+     uint16_t idx, i;
+@@ -168,12 +182,12 @@ cl_error_t cli_bm_initoff(const struct cli_matcher *root, struct cli_bm_off *dat
+     }
+ 
+     data->cnt = data->pos = 0;
+-    data->offtab          = (uint32_t *)malloc(root->bm_patterns * sizeof(uint32_t));
++    data->offtab          = (size_t *)malloc(root->bm_patterns * sizeof(size_t));
+     if (!data->offtab) {
+         cli_errmsg("cli_bm_initoff: Can't allocate memory for data->offtab\n");
+         return CL_EMEM;
+     }
+-    data->offset = (uint32_t *)malloc(root->bm_patterns * sizeof(uint32_t));
++    data->offset = (size_t *)malloc(root->bm_patterns * sizeof(size_t));
+     if (!data->offset) {
+         cli_errmsg("cli_bm_initoff: Can't allocate memory for data->offset\n");
+         free(data->offtab);
+@@ -183,7 +197,7 @@ cl_error_t cli_bm_initoff(const struct cli_matcher *root, struct cli_bm_off *dat
+         patt = root->bm_pattab[i];
+         if (patt->offdata[0] == CLI_OFF_ABSOLUTE) {
+             data->offtab[data->cnt] = patt->offset_min + patt->prefix_length;
+-            if (data->offtab[data->cnt] >= info->fsize)
++            if (data->offtab[data->cnt] >= (size_t)info->fsize)
+                 continue;
+             data->cnt++;
+         } else if (CL_SUCCESS != (ret = cli_caloff(NULL, info, root->type, patt->offdata, &data->offset[patt->offset_min], NULL))) {
+@@ -191,17 +205,17 @@ cl_error_t cli_bm_initoff(const struct cli_matcher *root, struct cli_bm_off *dat
+             free(data->offtab);
+             free(data->offset);
+             return ret;
+-        } else if ((data->offset[patt->offset_min] != CLI_OFF_NONE) && (data->offset[patt->offset_min] + patt->length <= info->fsize)) {
++        } else if ((data->offset[patt->offset_min] != CLI_OFF_NONE) && (data->offset[patt->offset_min] + patt->length <= (size_t)info->fsize)) {
+             if (!data->cnt || (data->offset[patt->offset_min] + patt->prefix_length != data->offtab[data->cnt - 1])) {
+                 data->offtab[data->cnt] = data->offset[patt->offset_min] + patt->prefix_length;
+-                if (data->offtab[data->cnt] >= info->fsize)
++                if (data->offtab[data->cnt] >= (size_t)info->fsize)
+                     continue;
+                 data->cnt++;
+             }
+         }
+     }
+ 
+-    cli_qsort(data->offtab, data->cnt, sizeof(uint32_t), NULL);
++    cli_qsort(data->offtab, data->cnt, sizeof(size_t), cmp_offtab);
+     return CL_SUCCESS;
+ }
+ 
+@@ -243,9 +257,10 @@ void cli_bm_free(struct cli_matcher *root)
+     }
+ }
+ 
+-cl_error_t cli_bm_scanbuff(const unsigned char *buffer, uint32_t length, const char **virname, const struct cli_bm_patt **patt, const struct cli_matcher *root, uint32_t offset, const struct cli_target_info *info, struct cli_bm_off *offdata, cli_ctx *ctx)
++cl_error_t cli_bm_scanbuff(const unsigned char *buffer, uint32_t length, const char **virname, const struct cli_bm_patt **patt, const struct cli_matcher *root, size_t offset, const struct cli_target_info *info, struct cli_bm_off *offdata, cli_ctx *ctx)
+ {
+-    uint32_t i, j, off, off_min, off_max;
++    uint32_t i, j, off;
++    size_t foff, off_min, off_max;
+     uint8_t found, pchain, shift;
+     uint16_t idx, idxchk;
+     struct cli_bm_patt *p;
+@@ -272,7 +287,7 @@ cl_error_t cli_bm_scanbuff(const unsigned char *buffer, uint32_t length, const c
+             offdata->pos++;
+         if (offdata->pos >= offdata->cnt)
+             return CL_CLEAN;
+-        i += offdata->offtab[offdata->pos] - offset;
++        i = bm_skip(i, offdata->offtab[offdata->pos] - offset, length);
+     }
+     for (; i < length - BM_BLOCK_SIZE + 1;) {
+         idx   = HASH(buffer[i], buffer[i + 1], buffer[i + 2]);
+@@ -283,15 +298,15 @@ cl_error_t cli_bm_scanbuff(const unsigned char *buffer, uint32_t length, const c
+             p      = root->bm_suffix[idx];
+             if (p && p->cnt == 1 && p->pattern0 != prefix) {
+                 if (offdata) {
+-                    off = offset + i - BM_MIN_LENGTH + BM_BLOCK_SIZE;
+-                    for (; offdata->pos < offdata->cnt && off >= offdata->offtab[offdata->pos]; offdata->pos++)
++                    foff = offset + i - BM_MIN_LENGTH + BM_BLOCK_SIZE;
++                    for (; offdata->pos < offdata->cnt && foff >= offdata->offtab[offdata->pos]; offdata->pos++)
+                         ;
+-                    if (offdata->pos == offdata->cnt || off >= offdata->offtab[offdata->pos]) {
++                    if (offdata->pos == offdata->cnt || foff >= offdata->offtab[offdata->pos]) {
+                         if (viruses_found)
+                             return CL_VIRUS;
+                         return CL_CLEAN;
+                     }
+-                    i += offdata->offtab[offdata->pos] - off;
++                    i = bm_skip(i, offdata->offtab[offdata->pos] - foff, length);
+                 } else {
+                     i++;
+                 }
+@@ -374,8 +389,8 @@ cl_error_t cli_bm_scanbuff(const unsigned char *buffer, uint32_t length, const c
+                             off_min = p->offset_min;
+                             off_max = p->offset_max;
+                         }
+-                        off = offset + i - p->prefix_length - BM_MIN_LENGTH + BM_BLOCK_SIZE;
+-                        if (off_min == CLI_OFF_NONE || off_max < off || off_min > off) {
++                        foff = offset + i - p->prefix_length - BM_MIN_LENGTH + BM_BLOCK_SIZE;
++                        if (off_min == CLI_OFF_NONE || off_max < foff || off_min > foff) {
+                             p = p->next;
+                             continue;
+                         }
+@@ -404,16 +419,16 @@ cl_error_t cli_bm_scanbuff(const unsigned char *buffer, uint32_t length, const c
+         }
+ 
+         if (offdata) {
+-            off = offset + i - BM_MIN_LENGTH + BM_BLOCK_SIZE;
+-            for (; offdata->pos < offdata->cnt && off >= offdata->offtab[offdata->pos]; offdata->pos++)
++            foff = offset + i - BM_MIN_LENGTH + BM_BLOCK_SIZE;
++            for (; offdata->pos < offdata->cnt && foff >= offdata->offtab[offdata->pos]; offdata->pos++)
+                 ;
+-            if (offdata->pos == offdata->cnt || off >= offdata->offtab[offdata->pos]) {
++            if (offdata->pos == offdata->cnt || foff >= offdata->offtab[offdata->pos]) {
+                 if (viruses_found > 0) {
+                     return CL_VIRUS;
+                 }
+                 return CL_CLEAN;
+             }
+-            i += offdata->offtab[offdata->pos] - off;
++            i = bm_skip(i, offdata->offtab[offdata->pos] - foff, length);
+         } else {
+             i += shift;
+         }
+diff --git a/libclamav/matcher-bm.h b/libclamav/matcher-bm.h
+index 449210e..4171e5b 100644
+--- a/libclamav/matcher-bm.h
++++ b/libclamav/matcher-bm.h
+@@ -33,7 +33,7 @@
+ struct cli_bm_patt {
+     unsigned char *pattern, *prefix;
+     char *virname;
+-    uint32_t offdata[4], offset_min, offset_max;
++    size_t offdata[4], offset_min, offset_max;
+     struct cli_bm_patt *next;
+     uint16_t length, prefix_length;
+     uint16_t cnt;
+@@ -42,14 +42,15 @@ struct cli_bm_patt {
+ };
+ 
+ struct cli_bm_off {
+-    uint32_t *offset, *offtab, cnt, pos;
++    size_t *offset, *offtab;
++    uint32_t cnt, pos;
+ };
+ 
+ cl_error_t cli_bm_addpatt(struct cli_matcher *root, struct cli_bm_patt *pattern, const char *offset);
+ cl_error_t cli_bm_init(struct cli_matcher *root);
+ cl_error_t cli_bm_initoff(const struct cli_matcher *root, struct cli_bm_off *data, const struct cli_target_info *info);
+ void cli_bm_freeoff(struct cli_bm_off *data);
+-cl_error_t cli_bm_scanbuff(const unsigned char *buffer, uint32_t length, const char **virname, const struct cli_bm_patt **patt, const struct cli_matcher *root, uint32_t offset, const struct cli_target_info *info, struct cli_bm_off *offdata, cli_ctx *ctx);
++cl_error_t cli_bm_scanbuff(const unsigned char *buffer, uint32_t length, const char **virname, const struct cli_bm_patt **patt, const struct cli_matcher *root, size_t offset, const struct cli_target_info *info, struct cli_bm_off *offdata, cli_ctx *ctx);
+ void cli_bm_free(struct cli_matcher *root);
+ 
+ #endif
+diff --git a/libclamav/matcher-byte-comp.c b/libclamav/matcher-byte-comp.c
+index bde6546..f7d84c8 100644
+--- a/libclamav/matcher-byte-comp.c
++++ b/libclamav/matcher-byte-comp.c
+@@ -456,7 +456,7 @@ cl_error_t cli_bcomp_scanbuf(const unsigned char *buffer, size_t buffer_length,
+     cl_error_t ret         = CL_SUCCESS;
+     cl_error_t bcomp_check = CL_SUCCESS;
+     uint32_t lsigid, ref_subsigid;
+-    uint32_t offset              = 0;
++    size_t offset                = 0;
+     struct cli_bcomp_meta *bcomp = NULL;
+     struct cli_ac_result *newres = NULL;
+ 
+diff --git a/libclamav/matcher-pcre.c b/libclamav/matcher-pcre.c
+index 8715dd2..82a520d 100644
+--- a/libclamav/matcher-pcre.c
++++ b/libclamav/matcher-pcre.c
+@@ -431,7 +431,7 @@ cl_error_t cli_pcre_recaloff(struct cli_matcher *root, struct cli_pcre_off *data
+     cl_error_t ret;
+     unsigned int i;
+     struct cli_pcre_meta *pm;
+-    uint32_t endoff;
++    size_t endoff;
+ 
+     if (!data) {
+         return CL_ENULLARG;
+@@ -444,20 +444,20 @@ cl_error_t cli_pcre_recaloff(struct cli_matcher *root, struct cli_pcre_off *data
+     }
+ 
+     /* allocate data structures */
+-    data->shift = (uint32_t *)calloc(root->pcre_metas, sizeof(uint32_t));
++    data->shift = (size_t *)calloc(root->pcre_metas, sizeof(size_t));
+     if (!data->shift) {
+         cli_errmsg("cli_pcre_initoff: cannot allocate memory for data->shift\n");
+         return CL_EMEM;
+     }
+-    data->offset = (uint32_t *)calloc(root->pcre_metas, sizeof(uint32_t));
++    data->offset = (size_t *)calloc(root->pcre_metas, sizeof(size_t));
+     if (!data->offset) {
+         cli_errmsg("cli_pcre_initoff: cannot allocate memory for data->offset\n");
+         free(data->shift);
+         return CL_EMEM;
+     }
+ 
+-    pm_dbgmsg("CLI_OFF_NONE: %u\n", CLI_OFF_NONE);
+-    pm_dbgmsg("CLI_OFF_ANY: %u\n", CLI_OFF_ANY);
++    pm_dbgmsg("CLI_OFF_NONE: %zu\n", (size_t)CLI_OFF_NONE);
++    pm_dbgmsg("CLI_OFF_ANY: %zu\n", (size_t)CLI_OFF_ANY);
+ 
+     /* iterate across all pcre metadata and recalc offsets */
+     for (i = 0; i < root->pcre_metas; ++i) {
+@@ -497,7 +497,7 @@ cl_error_t cli_pcre_recaloff(struct cli_matcher *root, struct cli_pcre_off *data
+             }
+         }
+ 
+-        pm_dbgmsg("%u: %u %u->%u(+%u)\n", i, pm->offdata[0], data->offset[i],
++        pm_dbgmsg("%u: %zu %zu->%zu(+%zu)\n", i, pm->offdata[0], data->offset[i],
+                   data->offset[i] + data->shift[i], data->shift[i]);
+     }
+ 
+@@ -514,7 +514,7 @@ void cli_pcre_freeoff(struct cli_pcre_off *data)
+     }
+ }
+ 
+-int cli_pcre_qoff(struct cli_pcre_meta *pm, uint32_t length, uint32_t *adjbuffer, uint32_t *adjshift)
++int cli_pcre_qoff(struct cli_pcre_meta *pm, uint32_t length, size_t *adjbuffer, size_t *adjshift)
+ {
+     if (!pm)
+         return CL_ENULLARG;
+@@ -549,7 +549,8 @@ cl_error_t cli_pcre_scanbuf(const unsigned char *buffer, uint32_t length, const
+     struct cli_pcre_data *pd;
+     struct cli_pcre_results p_res;
+     struct cli_ac_result *newres;
+-    uint32_t adjbuffer, adjshift, adjlength;
++    size_t adjbuffer, adjshift;
++    uint32_t adjlength;
+     unsigned int i, evalcnt = 0;
+     uint64_t evalids = 0;
+     uint32_t global, encompass, rolling;
+@@ -623,21 +624,21 @@ cl_error_t cli_pcre_scanbuf(const unsigned char *buffer, uint32_t length, const
+             /* handle encompass flag */
+             if (encompass && adjshift != 0 && adjshift != CLI_OFF_NONE) {
+                 if (adjbuffer + adjshift > length)
+-                    adjlength = length - adjbuffer;
++                    adjlength = length - (uint32_t)adjbuffer;
+                 else
+-                    adjlength = adjshift;
++                    adjlength = (uint32_t)adjshift;
+             } else {
+                 /* NOTE - if using non-encompass method 2, alter shift universally */
+                 /* TODO - limitations on non-encompassed buffers? */
+-                adjlength = length - adjbuffer;
++                adjlength = length - (uint32_t)adjbuffer;
+             }
+         } else {
+             /* starting offset is outside bounds of file, skip pcre execution silently */
+-            pm_dbgmsg("cli_pcre_scanbuf: starting offset is outside bounds of file %u >= %u\n", adjbuffer, length);
++            pm_dbgmsg("cli_pcre_scanbuf: starting offset is outside bounds of file %zu >= %u\n", adjbuffer, length);
+             continue;
+         }
+ 
+-        pm_dbgmsg("cli_pcre_scanbuf: passed buffer adjusted to %u +%u(%u)[%u]%s\n", adjbuffer, adjlength, adjbuffer + adjlength, adjshift, encompass ? " (encompass)" : "");
++        pm_dbgmsg("cli_pcre_scanbuf: passed buffer adjusted to %zu +%u(%zu)[%zu]%s\n", adjbuffer, adjlength, adjbuffer + adjlength, adjshift, encompass ? " (encompass)" : "");
+ 
+         /* if the global flag is set, loop through the scanning */
+         do {
+@@ -661,13 +662,13 @@ cl_error_t cli_pcre_scanbuf(const unsigned char *buffer, uint32_t length, const
+ 
+             /* matched, rc shouldn't be >0 unless a full match occurs */
+             if (rc > 0) {
+-                cli_dbgmsg("cli_pcre_scanbuf: located regex match @ %d\n", adjbuffer + p_res.match[0]);
++                cli_dbgmsg("cli_pcre_scanbuf: located regex match @ %zu\n", adjbuffer + p_res.match[0]);
+ 
+                 /* check if we've gone over offset+shift */
+                 if (!encompass && adjshift) {
+                     if (p_res.match[0] > adjshift) {
+                         /* ignore matched offset (outside of maxshift) */
+-                        cli_dbgmsg("cli_pcre_scanbuf: match found outside of maxshift @%u\n", adjbuffer + p_res.match[0]);
++                        cli_dbgmsg("cli_pcre_scanbuf: match found outside of maxshift @%zu\n", adjbuffer + p_res.match[0]);
+                         break;
+                     }
+                 }
+@@ -678,7 +679,7 @@ cl_error_t cli_pcre_scanbuf(const unsigned char *buffer, uint32_t length, const
+                 /* for logical signature evaluation */
+ 
+                 if (pm->lsigid[0]) {
+-                    pm_dbgmsg("cli_pcre_scanbuf: assigning lsigcnt[%d][%d], located @ %d\n",
++                    pm_dbgmsg("cli_pcre_scanbuf: assigning lsigcnt[%d][%d], located @ %zu\n",
+                               pm->lsigid[1], pm->lsigid[2], adjbuffer + p_res.match[0]);
+ 
+                     ret = lsig_sub_matched(root, mdata, pm->lsigid[1], pm->lsigid[2], adjbuffer + p_res.match[0], 0);
+diff --git a/libclamav/matcher-pcre.h b/libclamav/matcher-pcre.h
+index d72f4e8..c7230ab 100644
+--- a/libclamav/matcher-pcre.h
++++ b/libclamav/matcher-pcre.h
+@@ -41,7 +41,7 @@
+ 
+ /* stores offset data */
+ struct cli_pcre_off {
+-    uint32_t *offset, *shift;
++    size_t *offset, *shift;
+ };
+ 
+ #define PCRE_BYPASS "7374756c747a676574737265676578"
+@@ -56,8 +56,8 @@ struct cli_pcre_meta {
+     uint32_t lsigid[3]; /* 0=valid, 1=lsigid, 2=subsigid */
+     struct cli_pcre_data pdata;
+     /* clamav offset data */
+-    uint32_t offdata[4];
+-    uint32_t offset_min, offset_max;
++    size_t offdata[4];
++    size_t offset_min, offset_max;
+     /* internal flags (bitfield?) */
+     uint32_t flags;
+     /* performance tracking */
+diff --git a/libclamav/matcher.c b/libclamav/matcher.c
+index 0367e33..5c9655b 100644
+--- a/libclamav/matcher.c
++++ b/libclamav/matcher.c
+@@ -99,7 +99,7 @@ static inline int perf_log_tries(int8_t acmode, int8_t bm_called, int32_t length
+ static inline cl_error_t matcher_run(const struct cli_matcher *root,
+                                      const unsigned char *buffer, uint32_t length,
+                                      const char **virname, struct cli_ac_data *mdata,
+-                                     uint32_t offset,
++                                     size_t offset,
+                                      const struct cli_target_info *tinfo,
+                                      cli_file_t ftype,
+                                      struct cli_matched_type **ftoffset,
+@@ -114,7 +114,8 @@ static inline cl_error_t matcher_run(const struct cli_matcher *root,
+     cl_error_t ret, saved_ret = CL_CLEAN;
+     int32_t pos = 0;
+     struct filter_match_info info;
+-    uint32_t orig_length, orig_offset;
++    uint32_t orig_length;
++    size_t orig_offset;
+     const unsigned char *orig_buffer;
+ 
+     if (root->filter) {
+@@ -220,7 +221,7 @@ static inline cl_error_t matcher_run(const struct cli_matcher *root,
+                     return CL_EMAXSIZE;
+                 }
+ 
+-                cli_dbgmsg("matcher_run: performing regex matching on full map: %u+%u(%u) >= %zu\n", offset, length, offset + length, map->len);
++                cli_dbgmsg("matcher_run: performing regex matching on full map: %zu+%u(%zu) >= %zu\n", offset, length, offset + length, map->len);
+ 
+                 buffer = fmap_need_off_once(map, 0, map->len);
+                 if (!buffer)
+@@ -239,7 +240,7 @@ static inline cl_error_t matcher_run(const struct cli_matcher *root,
+                 return CL_EMAXSIZE;
+             }
+ 
+-            cli_dbgmsg("matcher_run: performing regex matching on buffer with no map: %u+%u(%u)\n", offset, length, offset + length);
++            cli_dbgmsg("matcher_run: performing regex matching on buffer with no map: %zu+%u(%zu)\n", offset, length, offset + length);
+             /* scan the specified buffer */
+             ret = cli_pcre_scanbuf(buffer, length, virname, acres, root, mdata, poffdata, ctx);
+         }
+@@ -260,7 +261,7 @@ static inline cl_error_t matcher_run(const struct cli_matcher *root,
+     return ret;
+ }
+ 
+-cl_error_t cli_scan_buff(const unsigned char *buffer, uint32_t length, uint32_t offset, cli_ctx *ctx, cli_file_t ftype, struct cli_ac_data **acdata)
++cl_error_t cli_scan_buff(const unsigned char *buffer, uint32_t length, size_t offset, cli_ctx *ctx, cli_file_t ftype, struct cli_ac_data **acdata)
+ {
+     cl_error_t ret = CL_CLEAN;
+     unsigned int i = 0, j = 0;
+@@ -345,7 +346,7 @@ cl_error_t cli_scan_buff(const unsigned char *buffer, uint32_t length, uint32_t
+  * offdata[2]: max shift
+  * offdata[3]: section number
+  */
+-cl_error_t cli_caloff(const char *offstr, const struct cli_target_info *info, cli_target_t target, uint32_t *offdata, uint32_t *offset_min, uint32_t *offset_max)
++cl_error_t cli_caloff(const char *offstr, const struct cli_target_info *info, cli_target_t target, size_t *offdata, size_t *offset_min, size_t *offset_max)
+ {
+     char offcpy[65] = {0};
+     unsigned int n = 0, val = 0;
+@@ -471,7 +472,7 @@ cl_error_t cli_caloff(const char *offstr, const struct cli_target_info *info, cl
+ 
+         switch (offdata[0]) {
+             case CLI_OFF_EOF_MINUS:
+-                *offset_min = info->fsize - offdata[1];
++                *offset_min = (size_t)info->fsize - offdata[1];
+                 break;
+ 
+             case CLI_OFF_EP_PLUS:
+@@ -511,7 +512,7 @@ cl_error_t cli_caloff(const char *offstr, const struct cli_target_info *info, cl
+                     *offset_min = *offset_max = CLI_OFF_ANY;
+                 break;
+             default:
+-                cli_errmsg("cli_caloff: Not a relative offset (type: %u)\n", offdata[0]);
++                cli_errmsg("cli_caloff: Not a relative offset (type: %zu)\n", offdata[0]);
+                 return CL_EARG;
+         }
+ 
+@@ -860,6 +861,20 @@ static int intermediates_eval(cli_ctx *ctx, struct cli_ac_lsig *ac_lsig)
+     return 1;
+ }
+ 
++/* Number of sub-signatures tracked per logical signature (the width of lsigcnt and lsigsuboff rows). */
++#define LSIG_MAX_SUBSIGS 64
++
++/* The bytecode API takes 32-bit offsets. A bytecode only runs on files below 4 GiB, so every
++ * recorded offset fits; the "not matched" marker keeps the value the bytecode API defines. */
++static void narrow_subsig_offsets(uint32_t narrow[LSIG_MAX_SUBSIGS], const size_t wide[LSIG_MAX_SUBSIGS])
++{
++    unsigned int i;
++
++    for (i = 0; i < LSIG_MAX_SUBSIGS; i++) {
++        narrow[i] = (wide[i] == CLI_OFF_NONE) ? 0xfffffffeU : (uint32_t)wide[i];
++    }
++}
++
+ static cl_error_t lsig_eval(cli_ctx *ctx, struct cli_matcher *root, struct cli_ac_data *acdata, struct cli_target_info *target_info, uint32_t lsid)
+ {
+     cl_error_t status           = CL_CLEAN;
+@@ -980,7 +995,9 @@ static cl_error_t lsig_eval(cli_ctx *ctx, struct cli_matcher *root, struct cli_a
+         }
+     } else {
+         // Logical sig depends on bytecode match. Check for the bytecode match.
+-        status = cli_bytecode_runlsig(ctx, target_info, &ctx->engine->bcs, ac_lsig->bc_idx, acdata->lsigcnt[lsid], acdata->lsigsuboff_first[lsid], ctx->fmap);
++        uint32_t bc_suboff[LSIG_MAX_SUBSIGS];
++        narrow_subsig_offsets(bc_suboff, acdata->lsigsuboff_first[lsid]);
++        status = cli_bytecode_runlsig(ctx, target_info, &ctx->engine->bcs, ac_lsig->bc_idx, acdata->lsigcnt[lsid], bc_suboff, ctx->fmap);
+         if (CL_SUCCESS != status) {
+             goto done;
+         }
+@@ -1073,7 +1090,8 @@ cl_error_t cli_scan_fmap(cli_ctx *ctx, cli_file_t ftype, bool filetype_only, str
+     unsigned char digest[CLI_HASH_AVAIL_TYPES][CLI_HASHLEN_MAX];
+ 
+     unsigned int i = 0, j = 0;
+-    uint32_t maxpatlen, bytes, offset = 0;
++    uint32_t maxpatlen, bytes;
++    size_t offset = 0;
+ 
+     struct cli_ac_data generic_ac_data;
+     bool gdata_initialized = false;
+@@ -1466,7 +1484,7 @@ done:
+ }
+ 
+ #define CDBRANGE(field, val)                                              \
+-    if (field[0] != CLI_OFF_ANY) {                                        \
++    if (field[0] != CLI_CDB_ANY) {                                        \
+         if (field[0] == field[1] && field[0] != val)                      \
+             continue;                                                     \
+         else if (field[0] != field[1] && ((field[0] && field[0] > val) || \
+diff --git a/libclamav/matcher.h b/libclamav/matcher.h
+index 310451b..bd2314a 100644
+--- a/libclamav/matcher.h
++++ b/libclamav/matcher.h
+@@ -250,8 +250,10 @@ static const struct cli_mtarget cli_mtargets[CLI_MTARGETS] = {
+ 
+ // clang-format off
+ 
+-#define CLI_OFF_ANY         0xffffffff
+-#define CLI_OFF_NONE        0xfffffffe
++#define CLI_OFF_ANY         SIZE_MAX
++#define CLI_OFF_NONE        (SIZE_MAX - 1)
++/* "Any value" marker of the container metadata (cdb) ranges. */
++#define CLI_CDB_ANY         0xffffffffU
+ #define CLI_OFF_ABSOLUTE    1
+ #define CLI_OFF_EOF_MINUS   2
+ #define CLI_OFF_EP_PLUS     3
+@@ -295,7 +297,7 @@ static const struct cli_mtarget cli_mtargets[CLI_MTARGETS] = {
+  *                          Required if you want to evaluate logical expressions afterwards.
+  * @return cl_error_t
+  */
+-cl_error_t cli_scan_buff(const unsigned char *buffer, uint32_t length, uint32_t offset, cli_ctx *ctx, cli_file_t ftype, struct cli_ac_data **acdata);
++cl_error_t cli_scan_buff(const unsigned char *buffer, uint32_t length, size_t offset, cli_ctx *ctx, cli_file_t ftype, struct cli_ac_data **acdata);
+ 
+ /**
+  * @brief Non-magic scan matching using a file descriptor for input.
+@@ -360,7 +362,7 @@ cl_error_t cli_scan_fmap(cli_ctx *ctx, cli_file_t ftype, bool filetype_only, str
+  */
+ cl_error_t cli_exp_eval(cli_ctx *ctx, struct cli_matcher *root, struct cli_ac_data *acdata, struct cli_target_info *target_info);
+ 
+-cl_error_t cli_caloff(const char *offstr, const struct cli_target_info *info, cli_target_t target, uint32_t *offdata, uint32_t *offset_min, uint32_t *offset_max);
++cl_error_t cli_caloff(const char *offstr, const struct cli_target_info *info, cli_target_t target, size_t *offdata, size_t *offset_min, size_t *offset_max);
+ 
+ /**
+  * @brief Determine if an alert is a known false positive, using each fmap in the ctx->container stack to check MD5, SHA1, and SHA2-256 hashes.
+diff --git a/libclamav/readdb.c b/libclamav/readdb.c
+index 45e00cf..ae77a09 100644
+--- a/libclamav/readdb.c
++++ b/libclamav/readdb.c
+@@ -3052,15 +3052,15 @@ static int cli_loadmd(FILE *fs, struct cl_engine *engine, unsigned int *signo, i
+             ret = CL_EMEM;
+             break;
+         }
+-        new->csize[0] = new->csize[1] = CLI_OFF_ANY;
++        new->csize[0] = new->csize[1] = CLI_CDB_ANY;
+ 
+         if (!strcmp(tokens[3], "*"))
+-            new->fsizer[0] = new->fsizer[1] = CLI_OFF_ANY;
++            new->fsizer[0] = new->fsizer[1] = CLI_CDB_ANY;
+         else
+             new->fsizer[0] = new->fsizer[1] = atoi(tokens[3]);
+ 
+         if (!strcmp(tokens[4], "*"))
+-            new->fsizec[0] = new->fsizec[1] = CLI_OFF_ANY;
++            new->fsizec[0] = new->fsizec[1] = CLI_CDB_ANY;
+         else
+             new->fsizec[0] = new->fsizec[1] = atoi(tokens[4]);
+ 
+@@ -3078,7 +3078,7 @@ static int cli_loadmd(FILE *fs, struct cl_engine *engine, unsigned int *signo, i
+ 
+         /* tokens[6] - not used */
+ 
+-        new->filepos[0] = new->filepos[1] = strcmp(tokens[7], "*") ? (unsigned int)atoi(tokens[7]) : (unsigned int)CLI_OFF_ANY;
++        new->filepos[0] = new->filepos[1] = strcmp(tokens[7], "*") ? (unsigned int)atoi(tokens[7]) : (unsigned int)CLI_CDB_ANY;
+ 
+         /* tokens[8] - not used */
+ 
+@@ -3228,7 +3228,7 @@ static int cli_loadcdb(FILE *fs, struct cl_engine *engine, unsigned int *signo,
+             break;                                                            \
+         }                                                                     \
+     } else {                                                                  \
+-        dest[0] = dest[1] = CLI_OFF_ANY;                                      \
++        dest[0] = dest[1] = CLI_CDB_ANY;                                      \
+     }
+ 
+         CDBRANGE(tokens[2], new->csize);
+diff --git a/libclamav/scanners.c b/libclamav/scanners.c
+index aad8f1f..cefb96d 100644
+--- a/libclamav/scanners.c
++++ b/libclamav/scanners.c
+@@ -2649,7 +2649,8 @@ static cl_error_t cli_scanscript(cli_ctx *ctx)
+     char *tmpname = NULL;
+     int ofd       = -1;
+     struct cli_matcher *target_ac_root;
+-    uint32_t maxpatlen, offset = 0;
++    uint32_t maxpatlen;
++    size_t offset = 0;
+     struct cli_matcher *generic_ac_root;
+     struct cli_ac_data gmdata, tmdata;
+     int gmdata_initialized = 0;
+diff --git a/libclamav/yara_exec.c b/libclamav/yara_exec.c
+index ab434b0..f490cde 100644
+--- a/libclamav/yara_exec.c
++++ b/libclamav/yara_exec.c
+@@ -139,7 +139,7 @@ int yr_execute_code(
+   uint32_t rule_matches = 0;
+   struct cli_lsig_matches * ls_matches;
+   struct cli_subsig_matches * ss_matches;
+-  uint32_t * offs;
++  size_t * offs;
+ #endif
+ 
+   YR_RULE* rule;
+@@ -616,12 +616,12 @@ int yr_execute_code(
+             if (ss_matches != NULL) {
+                 offs = ss_matches->offsets;
+                 for (i_u32 = 0; i_u32 < ss_matches->next; i_u32++) {
+-                    if (offs[i_u32] == r1) {
++                    if ((int64_t)offs[i_u32] == r1) {
+                         push(1);
+                         found = 1;
+                         break;
+                     }
+-                    if (r1 < offs[i_u32])
++                    if (r1 < (int64_t)offs[i_u32])
+                         break;
+                 }
+             }
+@@ -670,13 +670,13 @@ int yr_execute_code(
+             if (ss_matches != NULL) {
+                 offs = ss_matches->offsets;
+                 for (i_u32 = 0; i_u32 < ss_matches->next; i_u32++) {
+-                    if (offs[i_u32] >= r1 &&
+-                        offs[i_u32] <= r2) {
++                    if ((int64_t)offs[i_u32] >= r1 &&
++                        (int64_t)offs[i_u32] <= r2) {
+                         push(1);
+                         found = TRUE;
+                         break;
+                     }
+-                    if (r2 < offs[i_u32])
++                    if (r2 < (int64_t)offs[i_u32])
+                         break;
+                 }
+             }
+-- 
+2.53.0
+

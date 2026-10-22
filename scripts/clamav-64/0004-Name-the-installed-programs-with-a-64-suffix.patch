@@ -1,0 +1,137 @@
+From 1255fb16927f8905a8c1dbf88715d58e430ccfbc Mon Sep 17 00:00:00 2001
+From: packetdeath <packetdeath@localhost>
+Date: Sun, 4 Oct 2026 07:23:47 +0900
+Subject: [PATCH 4/4] Name the installed programs with a 64 suffix
+
+The 64-bit build installs next to the stock one under its own prefix;
+a 64 suffix on every program keeps the two from being mistaken for
+each other. Libraries and man pages keep their names.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ clambc/CMakeLists.txt     | 1 +
+ clamconf/CMakeLists.txt   | 1 +
+ clamd/CMakeLists.txt      | 1 +
+ clamdscan/CMakeLists.txt  | 1 +
+ clamdtop/CMakeLists.txt   | 1 +
+ clamscan/CMakeLists.txt   | 1 +
+ clamsubmit/CMakeLists.txt | 1 +
+ freshclam/CMakeLists.txt  | 4 ++--
+ sigtool/CMakeLists.txt    | 1 +
+ 9 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/clambc/CMakeLists.txt b/clambc/CMakeLists.txt
+index 445c684..84f29c3 100644
+--- a/clambc/CMakeLists.txt
++++ b/clambc/CMakeLists.txt
+@@ -24,6 +24,7 @@ target_include_directories( clambc
+     PRIVATE ${CMAKE_BINARY_DIR} # For clamav-config.h
+ )
+ set_target_properties( clambc PROPERTIES COMPILE_FLAGS "${WARNCFLAGS}" )
++set_target_properties( clambc PROPERTIES OUTPUT_NAME clambc64 )
+ 
+ if (APPLE AND CLAMAV_SIGN_FILE)
+     set_target_properties( clambc PROPERTIES
+diff --git a/clamconf/CMakeLists.txt b/clamconf/CMakeLists.txt
+index 19873ab..bab4905 100644
+--- a/clamconf/CMakeLists.txt
++++ b/clamconf/CMakeLists.txt
+@@ -24,6 +24,7 @@ target_include_directories( clamconf
+     PRIVATE ${CMAKE_BINARY_DIR} # For clamav-config.h
+ )
+ set_target_properties( clamconf PROPERTIES COMPILE_FLAGS "${WARNCFLAGS}" )
++set_target_properties( clamconf PROPERTIES OUTPUT_NAME clamconf64 )
+ 
+ if (APPLE AND CLAMAV_SIGN_FILE)
+     set_target_properties( clamconf PROPERTIES
+diff --git a/clamd/CMakeLists.txt b/clamd/CMakeLists.txt
+index 0ad1050..0941359 100644
+--- a/clamd/CMakeLists.txt
++++ b/clamd/CMakeLists.txt
+@@ -40,6 +40,7 @@ target_include_directories( clamd
+     PRIVATE ${CMAKE_BINARY_DIR} # For clamav-config.h
+ )
+ set_target_properties( clamd PROPERTIES COMPILE_FLAGS "${WARNCFLAGS}" )
++set_target_properties( clamd PROPERTIES OUTPUT_NAME clamd64 )
+ 
+ if (APPLE AND CLAMAV_SIGN_FILE)
+     set_target_properties( clamd PROPERTIES
+diff --git a/clamdscan/CMakeLists.txt b/clamdscan/CMakeLists.txt
+index 048bb16..6ecc6e6 100644
+--- a/clamdscan/CMakeLists.txt
++++ b/clamdscan/CMakeLists.txt
+@@ -29,6 +29,7 @@ target_include_directories( clamdscan
+     PRIVATE ${CMAKE_BINARY_DIR} # For clamav-config.h
+ )
+ set_target_properties( clamdscan PROPERTIES COMPILE_FLAGS "${WARNCFLAGS}" )
++set_target_properties( clamdscan PROPERTIES OUTPUT_NAME clamdscan64 )
+ 
+ if (APPLE AND CLAMAV_SIGN_FILE)
+     set_target_properties( clamdscan PROPERTIES
+diff --git a/clamdtop/CMakeLists.txt b/clamdtop/CMakeLists.txt
+index fafc2bf..9064140 100644
+--- a/clamdtop/CMakeLists.txt
++++ b/clamdtop/CMakeLists.txt
+@@ -24,6 +24,7 @@ target_include_directories( clamdtop
+     PRIVATE ${CMAKE_BINARY_DIR} # For clamav-config.h
+ )
+ set_target_properties( clamdtop PROPERTIES COMPILE_FLAGS "${WARNCFLAGS}" )
++set_target_properties( clamdtop PROPERTIES OUTPUT_NAME clamdtop64 )
+ 
+ if (APPLE AND CLAMAV_SIGN_FILE)
+     set_target_properties( clamdtop PROPERTIES
+diff --git a/clamscan/CMakeLists.txt b/clamscan/CMakeLists.txt
+index 64608c0..b1379dd 100644
+--- a/clamscan/CMakeLists.txt
++++ b/clamscan/CMakeLists.txt
+@@ -28,6 +28,7 @@ target_include_directories( clamscan
+     PRIVATE ${CMAKE_BINARY_DIR} # For clamav-config.h
+ )
+ set_target_properties( clamscan PROPERTIES COMPILE_FLAGS "${WARNCFLAGS}" )
++set_target_properties( clamscan PROPERTIES OUTPUT_NAME clamscan64 )
+ 
+ if (APPLE AND CLAMAV_SIGN_FILE)
+     set_target_properties( clamscan PROPERTIES
+diff --git a/clamsubmit/CMakeLists.txt b/clamsubmit/CMakeLists.txt
+index 62b2630..6e735da 100644
+--- a/clamsubmit/CMakeLists.txt
++++ b/clamsubmit/CMakeLists.txt
+@@ -24,6 +24,7 @@ target_include_directories( clamsubmit
+     PRIVATE ${CMAKE_BINARY_DIR} # For clamav-config.h
+ )
+ set_target_properties( clamsubmit PROPERTIES COMPILE_FLAGS "${WARNCFLAGS}" )
++set_target_properties( clamsubmit PROPERTIES OUTPUT_NAME clamsubmit64 )
+ 
+ if (APPLE AND CLAMAV_SIGN_FILE)
+     set_target_properties( clamscan PROPERTIES
+diff --git a/freshclam/CMakeLists.txt b/freshclam/CMakeLists.txt
+index 1aad530..4f7c481 100644
+--- a/freshclam/CMakeLists.txt
++++ b/freshclam/CMakeLists.txt
+@@ -46,9 +46,9 @@ else()
+     install(TARGETS freshclam-bin DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT programs)
+ endif()
+ 
+-# Now we rename freshclam-bin executable to freshclam using target properties
++# Now we rename freshclam-bin executable to freshclam64 using target properties
+ set_target_properties( freshclam-bin
+-        PROPERTIES OUTPUT_NAME freshclam )
++        PROPERTIES OUTPUT_NAME freshclam64 )
+ 
+ if(SYSTEMD_FOUND)
+     configure_file(
+diff --git a/sigtool/CMakeLists.txt b/sigtool/CMakeLists.txt
+index 496fa2c..f8ced43 100644
+--- a/sigtool/CMakeLists.txt
++++ b/sigtool/CMakeLists.txt
+@@ -28,6 +28,7 @@ target_include_directories( sigtool
+ )
+ 
+ set_target_properties( sigtool PROPERTIES COMPILE_FLAGS "${WARNCFLAGS}" )
++set_target_properties( sigtool PROPERTIES OUTPUT_NAME sigtool64 )
+ 
+ if (APPLE AND CLAMAV_SIGN_FILE)
+     set_target_properties( sigtool PROPERTIES
+-- 
+2.53.0
+
