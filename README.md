@@ -8,6 +8,7 @@ The watcher compares the name of each destination with a list, and cuts only the
 It is not a browser extension, so it does not rewrite anything inside the browser.
 You can also point other devices in your home, such as an iPhone, at the same watcher.
 
+The meaning of every command and option is in "Commands and options".
 If you use Windows, read "Using it on Windows" first.
 It covers getting the executable, where to put it, auto-start, and removal, in order.
 
@@ -205,7 +206,7 @@ In that mode, `curl` with `--max-time 5` ends after 5 seconds with `exit=28`.
   packetdeath does not touch the proxy settings of the machine it runs on, or the store of trusted certificates.
 - To use it from another device in your home, give `--listen` the LAN IP address of this machine (for example `192.0.2.10:8899`).
   By default it accepts only `127.0.0.1` and the private home ranges (10.x, 172.16 to 172.31, 192.168.x).
-  Add `--allow-from <CIDR>` to widen that.
+  To change that range, pass `--allow-from <CIDR>` (if you pass even one, the default ranges are not used and only the ones you pass apply).
 - On an iPhone or a Windows PC, enter the automatic proxy configuration URL `http://192.0.2.10:8899/proxy.pac`.
   It keeps destinations inside your LAN out of the relay.
   If the watcher stops, traffic falls back to `DIRECT` (a direct connection).
@@ -476,7 +477,12 @@ If the cut fails, the traffic continues and the `decision` in `flows.jsonl` stay
 
 4. Register the service.
    `--log-dir` is required.
-   Without `--pcapng`, the service neither records nor stops anything.
+   Give `--pcapng` the location of the `capture.pcapng` that step 6 creates.
+
+   **pcapng**: a file format for recorded network traffic. Many analysis tools, such as Wireshark, read it.
+   `capture.pcapng` is the pktmon capture (`.etl`) converted with `pktmon etl2pcap`. The service rereads this file about every 0.3 seconds and compares the destination names of the connections in it with the blocklist.
+   Without `--pcapng` there is nothing to read, so the service neither records nor stops anything (it starts and only waits for a stop signal).
+   The details of `--pcapng` are in "Commands and options", under "`--pcapng`: the entrance for the pktmon capture".
 
    ```
    & 'C:\Program Files\packetdeath\packetdeath.exe' service-install --log-dir 'C:\ProgramData\packetdeath' --pcapng 'C:\ProgramData\packetdeath\capture.pcapng' --blocklist 'C:\ProgramData\packetdeath\blocklist.txt'
@@ -545,6 +551,214 @@ If the cut fails, the traffic continues and the `decision` in `flows.jsonl` stay
    The service installs no extra driver, so the registration and these two folders are all there is to remove.
    Deleting `C:\ProgramData\packetdeath` deletes the logs too.
 
+## Commands and options
+
+The usage is `packetdeath <command> [option ...]`.
+A **command** is the first word, which chooses what to do (such as `proxy` or `block`).
+An **option** is a setting that changes how a command works. It starts with `--`, and most take one value (`--listen 127.0.0.1:8899`).
+
+How to read the values:
+
+- `<path>`: the location of a file or a folder.
+- "Repeatable": you can pass the same option several times. The lists you pass are used together (their union).
+- **CIDR**: a way to write a range of IPs (`192.168.0.0/16` means 192.168.0.0 to 192.168.255.255).
+- A list file ignores lines that start with `#`.
+  If you edit a list (blocklist, allowlist, iplist, `--mitm-list`) while the program runs, it is reread.
+  The interval depends on the path.
+  Linux `block` (the nfqueue path), `proxy` and the Windows service reread in about 0.3 seconds (a fixed 300 milliseconds for the service).
+  `block --pcapng` rereads at each poll of the `--pcapng` file (`--poll-ms`, default 1000 milliseconds).
+  A list that cannot be read is treated as an empty list and a `[warn]` is printed (startup does not stop).
+  There are two exceptions.
+  If the `--av` file cannot be read, it is treated as empty but an `[error]` is printed.
+  `defense-report` fails instead of treating a file as empty when any file cannot be read (an empty list would show `hits=0` and look clean).
+
+This section was written from the argument parsing in `src/main.rs` and the usage lines in `src/i18n.rs`.
+Running `packetdeath` with no arguments prints the usage lines.
+
+| Command | What it does | OS |
+|---|---|---|
+| `observe` | Records destinations in `flows.jsonl` without stopping anything | Linux only. On Windows it prints "not implemented" and exits |
+| `block` | Cuts connections to destinations on a list | Linux (nfqueue). On Windows `--pcapng` is required |
+| `eval` | Compares the log with a table of right answers and prints the stop rate and the wrongly-stopped rate | Both |
+| `filterlist` | Converts an EasyList-format list into the blocklist format | Both |
+| `allowlist-convert` | Converts a public allowlist into the allowlist format | Both |
+| `service-install` | Registers it as a Windows service | Windows only |
+| `service-uninstall` | Deletes the service registration | Windows only |
+| `service-run` | The body of the service. The service manager (SCM) starts it; users do not type it | Windows only |
+| `proxy` | Acts as a relay and cuts connections to destinations on a list | Both. Content inspection and active defense are Linux only |
+| `defense-report` | Counts the hits in the watch logs and shows whether a list may move to the blocking side | Linux only |
+
+If you do not pass `--log-dir`, the log folder is `$XDG_STATE_HOME/packetdeath` (or `$HOME/.local/state/packetdeath` if that is unset) on Linux, and `%LOCALAPPDATA%\packetdeath` on Windows.
+Only `service-install` and `service-run` require `--log-dir`, because the service runs as SYSTEM and `%LOCALAPPDATA%` is different there.
+
+### observe: record without stopping
+
+It records the destinations of traffic that was sent to nfqueue.
+It does not stop anything.
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--queue` | number | The nfqueue number that receives the traffic. Use the same value as `--queue-num` in the iptables rule | 1808 | Optional |
+| `--filter` | expression | An option that is accepted but not used. On Linux it is ignored with a `[warn]`. On Windows `observe` itself is not implemented | None | Optional |
+| `--log-dir` | `<path>` | The folder for `flows.jsonl` | The default location above | Optional |
+
+```
+sudo iptables -I OUTPUT -p tcp --dport 443 -j NFQUEUE --queue-num 1808 --queue-bypass
+sudo ./target/release/packetdeath observe --queue 1808 --log-dir ./log
+```
+
+### block: cut destinations on a list
+
+On Linux it judges the traffic that was sent to nfqueue and cuts it.
+On Windows it reads the capture that you pass with `--pcapng` and judges that (see the next part).
+
+| Option | Value | What it does | Default | Required | OS |
+|---|---|---|---|---|---|
+| `--queue` | number | The nfqueue number that receives the traffic | 1808 | Optional | Linux |
+| `--blocklist` | `<path>` | The list of names to stop. Repeatable | None (empty list) | Optional | Both |
+| `--allowlist` | `<path>` | The list of names to always let through. It is checked before the blocklist | None (empty list) | Optional | Both |
+| `--iplist` | `<path>` | The list of IPs and CIDRs to stop, one per line. Repeatable | None (empty list) | Optional | Both |
+| `--av` | `<path>` | The `av.jsonl` that an outside scanner wrote. The (IP, port) pairs of `malicious` lines are stopped | None (empty) | Optional | Both |
+| `--dns` | no value | Also cuts connections whose DNS alias (CNAME) points to a listed name. Records DNS answers in `dns.jsonl` | Off | Optional | Linux. Not used on the `--pcapng` path |
+| `--eve` | `<path>` | The location of the `eve.json` where Suricata writes alerts | None (no cut because of alerts) | Optional | Linux. Not used on the `--pcapng` path |
+| `--ips-sids` | `<path>` | The list of alert rule numbers (sids) to stop, one per line | None | Optional | Linux. Same |
+| `--ips-severity` | 1 to 3 | Stops alerts whose severity is this value or lower. 1 is the most severe | None (no cut by severity) | Optional | Linux. Same |
+| `--ips-ttl` | seconds | How long a destination stopped because of an alert stays stopped | 300 | Optional | Linux. Same |
+| `--pcapng` | `<path>` | The location of the pktmon capture converted with `pktmon etl2pcap` (next part) | None | Required on Windows | On Windows it cuts. On Linux it only judges and records, never cuts, and prints a `[warn]` |
+| `--poll-ms` | milliseconds | How often the `--pcapng` file is reread | 1000 | Optional | Together with `--pcapng` |
+| `--log-dir` | `<path>` | The folder for `flows.jsonl` and `dns.jsonl` | The default location above | Optional | Both |
+
+The options used on the `--pcapng` path are `--blocklist`, `--allowlist`, `--iplist`, `--av`, `--poll-ms` and `--log-dir` (`run_block` in `src/main.rs`).
+
+```
+sudo ./target/release/packetdeath block --queue 1808 --blocklist blocklist.txt --allowlist allowlist.txt --log-dir ./log
+```
+
+### --pcapng: the entrance for the pktmon capture
+
+**pcapng** is a file format for recorded network traffic.
+Many analysis tools, such as Wireshark, read it.
+What pktmon on Windows captures is saved in another format, `.etl`, so you convert it to `.pcapng` with `pktmon etl2pcap`.
+packetdeath can read the `.pcapng` one.
+
+```
+traffic -> pktmon captures it (capture.etl) -> pktmon etl2pcap converts it (capture.pcapng) -> --pcapng hands it to packetdeath
+```
+
+In short, `--pcapng` is the location of the capture file to read, and packetdeath never captures traffic by itself.
+
+packetdeath rereads the `--pcapng` file at a fixed interval and compares the destination names (SNI) of the connections in it with the lists.
+The interval is `--poll-ms` for `block` (default 1000 milliseconds) and a fixed 300 milliseconds for the Windows service.
+If the file has the same size as last time, it skips the reread.
+
+Without `--pcapng` there is nothing to read, so the service records nothing and cuts nothing.
+It starts and only waits for a stop signal.
+Without `--pcapng`, `block` prints "not implemented" and exits on Windows, and runs on the nfqueue path on Linux.
+
+Nothing that keeps the pktmon capture and conversion running ships with this repository.
+packetdeath does not start `pktmon`, to avoid the accident where a capture is left running after packetdeath dies and the file grows without limit.
+A note in `src/win_service.rs` says that the interval at which the pktmon capture is switched (rotated) was shortened to 3 seconds on a user's PC during testing.
+The script that does that rotation is not in this repository.
+While `capture.pcapng` is not updated, new traffic is not judged.
+
+### eval: measure the stop rate
+
+It compares `flows.jsonl` with a table of "host, and ad or ok" (the labels).
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--labels` | `<path>` | The table of right answers. One line is "host, tab, `ad` or `ok`". Lines in the wrong shape are ignored | None | Required |
+| `--log-dir` | `<path>` | The folder to read `flows.jsonl` from. If it is missing, it counts as 0 lines | The default location above | Optional |
+
+```
+./target/release/packetdeath eval --labels labels.tsv --log-dir ./log
+```
+
+### filterlist and allowlist-convert: convert lists
+
+Both only read and write files and never touch the network.
+`filterlist` turns the EasyList format into a blocklist, and `allowlist-convert` turns a public allowlist (Microsoft's JSON, one domain per line, or the Adblock Plus `@@` format) into an allowlist.
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--in` | `<path>` or `-` | The file to read. `-` is standard input | None | Required |
+| `--out` | `<path>` or `-` | The file to write. `-` is standard output | None | Required |
+
+```
+./target/release/packetdeath filterlist --in easylist.txt --out blocklist.txt
+```
+
+### service-install and service-uninstall: register and delete the Windows service
+
+Run `service-install` in an administrator PowerShell.
+The options it receives are written into the service's start-up arguments and passed on to `service-run`.
+`service-uninstall` takes no option.
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--log-dir` | `<path>` | The folder where the service puts `flows.jsonl` and `service.log` | None | Required |
+| `--pcapng` | `<path>` | The capture file to read (previous part). Without it the service neither records nor cuts anything | None | Optional |
+| `--blocklist` | `<path>` | The list of names to stop. Only one | None (empty list) | Optional |
+| `--allowlist` | `<path>` | The list of names to always let through. Only one | None (empty list) | Optional |
+
+```
+& 'C:\Program Files\packetdeath\packetdeath.exe' service-install --log-dir 'C:\ProgramData\packetdeath' --pcapng 'C:\ProgramData\packetdeath\capture.pcapng' --blocklist 'C:\ProgramData\packetdeath\blocklist.txt'
+& 'C:\Program Files\packetdeath\packetdeath.exe' service-uninstall
+```
+
+### proxy: receive traffic as a relay
+
+It needs no admin rights.
+It also runs on Windows.
+
+| Option | Value | What it does | Default | Required | OS |
+|---|---|---|---|---|---|
+| `--listen` | `addr:port` | The IP and port that receive traffic. There is no default, so that `0.0.0.0` is never opened silently | None | Required | Both |
+| `--blocklist` | `<path>` | The list of names to stop. Repeatable | None (empty list) | Optional | Both |
+| `--allowlist` | `<path>` | The list of names to always let through | None (empty list) | Optional | Both |
+| `--iplist` | `<path>` | The list of IPs and CIDRs to stop. Repeatable | None (empty list) | Optional | Both |
+| `--av` | `<path>` | The `av.jsonl` that an outside scanner wrote | None (empty) | Optional | Both |
+| `--deny` | `blackhole` or `403` | How a stopped connection is answered. `blackhole` pretends to connect and then stays silent. `403` returns `403 Forbidden` and closes | `blackhole` | Optional | Both |
+| `--allow-from` | CIDR | The range of clients it accepts. Repeatable. If you pass even one, the default is not used and only the ranges you pass apply. A value that does not parse as a CIDR is dropped with a `[warn]` ("--allow-from value does not parse as a CIDR"). If none parse, there are 0 entries and no client is accepted | `127.0.0.0/8`, `::1/128`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` | Optional | Both |
+| `--log-dir` | `<path>` | The folder for `flows.jsonl` and other logs | The default location above | Optional | Both |
+| `--mitm-list` | `<path>` | The list of destinations whose encrypted traffic is opened. It works only when all three of this, `--ca-dir` and `--clamd` are given | None | Optional | Linux. On Windows it prints a `[warn]` and stays off |
+| `--ca-dir` | `<path>` | The folder that holds the key and certificate of the CA (the certificate issuer) used to open traffic | None | One of the three | Linux. Same |
+| `--clamd` | socket path or `addr:port` | The location of `clamd` for virus inspection | None | One of the three | Linux. Same |
+| `--distrust` | `<path>` | The list of distrusted certificates. Connections to destinations whose chain contains a listed certificate are cut. Repeatable | None | Optional | Linux. On Windows it prints a `[warn]` and stays off |
+| `--watch-distrust` | `<path>` | Applies the same kind of list as `--distrust` but only records hits in `watch.jsonl` and stops nothing. Repeatable | None | Optional | Linux. Same |
+| `--watch-blocklist` | `<path>` | Records blocklist hits in `watch.jsonl` without stopping. Repeatable | None | Optional | Linux. Same |
+| `--watch-iplist` | `<path>` | Records iplist hits in `watch.jsonl` without stopping. Repeatable | None | Optional | Linux. Same |
+| `--probe-chains` | no value | For destinations whose traffic it does not open, packetdeath opens a separate TLS connection and reads the certificate chain. It sends the destination name as a plain-text SNI | Off | Optional | Linux. Same |
+| `--defense-off` | `<path>` | While this file exists, blocking by the distrust lists and the chain check is switched off and only recorded (`touch <path>` turns it on; deleting the file restores it) | None | Optional | Linux. Same |
+| `--breaker-hosts` | integer of 1 or more | The number of destinations one list may stop in 10 minutes. Beyond it, that list drops to watch-only | 5 | Optional | Linux. Same |
+
+```
+./target/release/packetdeath proxy --listen 127.0.0.1:8899 --blocklist blocklist.txt --allowlist allowlist.txt --deny 403 --log-dir ./log
+```
+
+If you give only one or two of `--mitm-list`, `--ca-dir` and `--clamd`, it starts with opening disabled and prints the missing option names as a `[warn]`.
+The details are in "Opening encrypted traffic (MITM)" and "Active defense".
+
+### defense-report: count the watch logs
+
+It only reads logs and changes neither traffic nor files.
+You must pass exactly one of `--flows` and `--watch` (it fails with both, and with neither).
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--flows` | `<path>` | `flows.jsonl`. Applies lists to a past log and counts the hits | None | `--flows` or `--watch` |
+| `--watch` | `<path>` | `watch.jsonl`. Counts hits per source and shows with `promote=yes` or `no` whether it may move to the blocking side | None | Same |
+| `--blocklist` | `<path>` | A blocklist used with `--flows`. Repeatable | None | Optional |
+| `--iplist` | `<path>` | An iplist used with `--flows`. Repeatable | None | Optional |
+| `--allowlist` | `<path>` | Counts separately how many hits are on the allowlist. Repeatable | None | Optional |
+| `--distrust` | `<path>` | A distrust list used with `--watch`. Adds `root=yes` to lines that name a public trust anchor (root). Repeatable | None | Optional |
+| `--days` | number of days | A lower bound on the days of log required before it says a source may move. The real number of days in the log cannot be raised by this value | 0 (at least 7 days of log are needed) | Optional |
+
+```
+./target/release/packetdeath defense-report --flows ./log/flows.jsonl --blocklist blocklist.txt
+./target/release/packetdeath defense-report --watch ./log/watch.jsonl --days 7
+```
+
 ## Details
 
 | You want to | Use |
@@ -558,6 +772,7 @@ If the cut fails, the traffic continues and the `decision` in `flows.jsonl` stay
 | Build lists of bad destinations from public feeds | `scripts/pd-malware-feed.sh` (next section) |
 
 Run `packetdeath` with no arguments to see the usage of every command.
+The meaning of every command and option is in the previous section, "Commands and options".
 
 Choose where logs go with `--log-dir`.
 

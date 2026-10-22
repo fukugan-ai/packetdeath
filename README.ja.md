@@ -8,6 +8,7 @@
 ブラウザの拡張機能ではないので、ブラウザの中身を書き換えません。
 同じ見張り役に、家の中の別の端末(iPhone など)の通信を向けることもできます。
 
+command と option の意味は「command と option の一覧」の節にあります。
 Windows で使う人は、先に「Windows で使う」の節を読んでください。
 実行 file の入手、置き場、自動起動、外し方までを順に書いています。
 
@@ -205,7 +206,7 @@ packetdeath の見張り役は、この名前を見ます。
   packetdeath は、自分の動く端末の proxy 設定にも、信頼する証明書の置き場にも触らない。
 - 家の中の別の端末から使うには、`--listen` に、この機械の LAN の IP(例：`192.0.2.10:8899`)を指定する。
   接続を受けるのは、既定では `127.0.0.1` と家庭用の私的な IP の範囲(10.x、172.16 から 172.31、192.168.x)だけである。
-  広げるには `--allow-from <CIDR>` を足す。
+  範囲を変えるには `--allow-from <CIDR>` を渡す(1 つでも渡すと、既定の範囲は使われず、渡した範囲だけになる)。
 - iPhone や Windows には、proxy の自動設定の URL `http://192.0.2.10:8899/proxy.pac` を入れる。
   この設定は、LAN の中の宛先を中継役の外へ通す。
   見張り役が止まっても、`DIRECT`(直接接続)へ倒れる。
@@ -476,7 +477,12 @@ packetdeath は pktmon を起動しません(止め忘れの事故を避ける�
 
 4. サービスを登録する。
    `--log-dir` は必須です。
-   `--pcapng` を渡さないと、サービスは何も記録も遮断もしません。
+   `--pcapng` には、手順 6 で作る `capture.pcapng` の場所を渡します。
+
+   **pcapng**：通信の記録を入れる file の形式。Wireshark など多くの解析ソフトが読む。
+   pktmon の記録(`.etl`)を `pktmon etl2pcap` で直したものが `capture.pcapng` で、サービスはこの file を約 0.3 秒ごとに読み直し、中の接続の宛先の名前を blocklist と照らします。
+   `--pcapng` を渡さないと、読む物が無いので、サービスは何も記録も遮断もしません(起動して、停止の合図を待つだけ)。
+   `--pcapng` の詳しい説明は、「command と option の一覧」の節の「`--pcapng`：pktmon の記録を読む入口」にあります。
 
    ```
    & 'C:\Program Files\packetdeath\packetdeath.exe' service-install --log-dir 'C:\ProgramData\packetdeath' --pcapng 'C:\ProgramData\packetdeath\capture.pcapng' --blocklist 'C:\ProgramData\packetdeath\blocklist.txt'
@@ -545,6 +551,216 @@ packetdeath は pktmon を起動しません(止め忘れの事故を避ける�
    サービスは追加の driver を入れないので、消すものは登録と、この 2 つの置き場だけです。
    `C:\ProgramData\packetdeath` を消すと、記録も消えます。
 
+## command と option の一覧
+
+`packetdeath` の使い方は `packetdeath <command> [option ...]` の形です。
+**command**：何をするかを選ぶ最初の語(`proxy` や `block` など)。
+**option**：command の動きを変える指定で、`--` で始まる語。
+多くは値を 1 つ取る(`--listen 127.0.0.1:8899`)。
+
+値の書き方の見方です。
+
+- `<path>`：file か folder の場所。
+- 「複数回」：同じ option を並べて渡せる。
+  渡した一覧は合わせて使われる(和集合)。
+- **CIDR**：IP の範囲の書き方(`192.168.0.0/16` は 192.168.0.0 から 192.168.255.255)。
+- 一覧の file は、行頭が `#` の行を無視する。
+  一覧(blocklist、allowlist、iplist、`--mitm-list`)は、実行中に書き換えると読み直される。
+  読み直しの間隔は、経路で違う。
+  Linux の `block`(nfqueue の経路)、`proxy`、Windows サービスは約 0.3 秒(サービスは固定の 300 ミリ秒)である。
+  `block --pcapng` は、`--pcapng` の file を読み直す poll ごと(`--poll-ms`、既定 1000 ミリ秒)である。
+  読めない一覧は、空の一覧として扱われ、`[warn]` が出る(起動は止まらない)。
+  例外が 2 つある。
+  `--av` の file が読めないときは、空として扱うが、`[error]` を出す。
+  `defense-report` は、読めない file が 1 つでもあると、空にせず失敗する(空の一覧では `hits=0` になり、問題が無いように見えるため)。
+
+この一覧は `src/main.rs` の引数の読み取りと、`src/i18n.rs` の使い方の行から書きました。
+引数なしで `packetdeath` を打つと、使い方の行が出ます。
+
+| command | 何をするか | OS |
+|---|---|---|
+| `observe` | 通信を止めず、宛先を `flows.jsonl` に記録する | Linux だけ。Windows では「未実装」と出て終わる |
+| `block` | 一覧に載った宛先の通信を断つ | Linux(nfqueue)。Windows では `--pcapng` が必須 |
+| `eval` | 記録を正解の表と突き合わせ、止めた率と誤って止めた率を出す | どちらも |
+| `filterlist` | EasyList 形式の一覧を blocklist の形に変換する | どちらも |
+| `allowlist-convert` | 公開の allowlist を allowlist の形に変換する | どちらも |
+| `service-install` | Windows サービスとして登録する | Windows だけ |
+| `service-uninstall` | サービスの登録を消す | Windows だけ |
+| `service-run` | サービスの本体。サービスの管理画面(SCM)が起動する物で、利用者は打たない | Windows だけ |
+| `proxy` | 中継役として通信を受け、一覧に載った宛先を断つ | どちらも。ただし通信の中身の検査と能動防御は Linux だけ |
+| `defense-report` | 見張りの記録を数え、止める側へ移してよいかを示す | Linux だけ |
+
+記録の置き場 `--log-dir` を渡さないと、Linux は `$XDG_STATE_HOME/packetdeath`(無ければ `$HOME/.local/state/packetdeath`)、Windows は `%LOCALAPPDATA%\packetdeath` になります。
+`service-install` と `service-run` だけは、サービスが SYSTEM 権限で動いて `%LOCALAPPDATA%` が変わるため、`--log-dir` が必須です。
+
+### observe：止めずに記録する
+
+nfqueue に回された通信の宛先を記録します。
+止めることはしません。
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--queue` | 番号 | 通信を受け取る nfqueue の番号。iptables の規則の `--queue-num` と同じ値にする | 1808 | 任意 |
+| `--filter` | 式 | 受け取るが使わない option。Linux では無視して `[warn]` を出す。Windows では `observe` 自体が未実装 | なし | 任意 |
+| `--log-dir` | `<path>` | `flows.jsonl` を置く folder | 上の既定の場所 | 任意 |
+
+```
+sudo iptables -I OUTPUT -p tcp --dport 443 -j NFQUEUE --queue-num 1808 --queue-bypass
+sudo ./target/release/packetdeath observe --queue 1808 --log-dir ./log
+```
+
+### block：一覧に載った宛先を断つ
+
+Linux では nfqueue に回された通信を判定して断ちます。
+Windows では、`--pcapng` で渡した記録を読んで判定します(次の節の説明を参照)。
+
+| option | 値 | 何をするか | 既定値 | 必須 | OS |
+|---|---|---|---|---|---|
+| `--queue` | 番号 | 通信を受け取る nfqueue の番号 | 1808 | 任意 | Linux |
+| `--blocklist` | `<path>` | 止める名前の一覧。複数回 | なし(空の一覧) | 任意 | どちらも |
+| `--allowlist` | `<path>` | 何があっても通す名前の一覧。blocklist より先に効く | なし(空の一覧) | 任意 | どちらも |
+| `--iplist` | `<path>` | 止める IP と CIDR の一覧(1 行に 1 つ)。複数回 | なし(空の一覧) | 任意 | どちらも |
+| `--av` | `<path>` | 外の検査の道具が書いた `av.jsonl`。`malicious` の行の「IP とポート」の組を止める | なし(空) | 任意 | どちらも |
+| `--dns` | 値なし | DNS の別名(CNAME)の先が一覧に載っている接続も断つ。DNS の答えを `dns.jsonl` に記録する | 切 | 任意 | Linux。`--pcapng` を付けた経路では使われない |
+| `--eve` | `<path>` | Suricata が警告を書く `eve.json` の場所 | なし(警告による遮断は 0 件) | 任意 | Linux。`--pcapng` を付けた経路では使われない |
+| `--ips-sids` | `<path>` | 止める警告の規則番号(sid)の一覧。1 行に 1 つ | なし | 任意 | Linux。同上 |
+| `--ips-severity` | 1 から 3 | この値以下の重さの警告を止める。1 が最も重い | なし(重さでは止めない) | 任意 | Linux。同上 |
+| `--ips-ttl` | 秒 | 警告で止めた宛先を止め続ける秒数 | 300 | 任意 | Linux。同上 |
+| `--pcapng` | `<path>` | pktmon の記録を `pktmon etl2pcap` で変えた file の場所(次の節) | なし | Windows では必須 | Windows は遮断する。Linux は判定と記録だけで遮断せず `[warn]` を出す |
+| `--poll-ms` | ミリ秒 | `--pcapng` の file を読み直す間隔 | 1000 | 任意 | `--pcapng` と一緒のとき |
+| `--log-dir` | `<path>` | `flows.jsonl` と `dns.jsonl` を置く folder | 上の既定の場所 | 任意 | どちらも |
+
+`--pcapng` を付けた経路で使われる option は、`--blocklist`、`--allowlist`、`--iplist`、`--av`、`--poll-ms`、`--log-dir` です(`src/main.rs` の `run_block`)。
+
+```
+sudo ./target/release/packetdeath block --queue 1808 --blocklist blocklist.txt --allowlist allowlist.txt --log-dir ./log
+```
+
+### --pcapng：pktmon の記録を読む入口
+
+**pcapng** は、通信の記録を入れる file の形式です。
+Wireshark など多くの解析ソフトが読みます。
+Windows の pktmon が捕まえた記録は `.etl` という別の形式で残るので、`pktmon etl2pcap` で `.pcapng` に直します。
+packetdeath が読めるのは、この `.pcapng` の方です。
+
+```
+通信 -> pktmon が捕まえる(capture.etl) -> pktmon etl2pcap で直す(capture.pcapng) -> --pcapng で packetdeath に渡す
+```
+
+図の結論は、`--pcapng` は「読む記録の file の場所」であり、packetdeath が通信を自分で捕まえることはない、である。
+
+packetdeath は、`--pcapng` の file を一定の間隔で読み直し、中の接続の宛先の名前(SNI)を一覧と照らします。
+読み直す間隔は、`block` では `--poll-ms`(既定 1000 ミリ秒)、Windows サービスでは固定の 300 ミリ秒です。
+file の大きさが前回と同じなら、読み直しを省きます。
+
+`--pcapng` を渡さないと、読む物が無いので、サービスは何も記録せず、何も遮断しません。
+サービスは起動して、停止の合図を待つだけになります。
+`block` に `--pcapng` を渡さないと、Windows では「未実装」と出て終わり、Linux では nfqueue の経路で動きます。
+
+pktmon の捕獲と変換を回し続ける仕組みは、このリポジトリに同梱していません。
+packetdeath が `pktmon` を起動しないのは、packetdeath が落ちたあとに捕獲だけが残って file が際限なく大きくなる事故を避けるためです。
+`src/win_service.rs` の注記には、利用者の PC で pktmon の記録の切り替え(rotate)の周期を 3 秒に詰めて試した旨があります。
+その周期を回す script は、リポジトリにありません。
+`capture.pcapng` が更新されない間は、新しい通信は判定されません。
+
+### eval：止めた率を測る
+
+`flows.jsonl` を、「host と ad か ok」の表(labels)と突き合わせます。
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--labels` | `<path>` | 正解の表。1 行に「host、タブ、`ad` か `ok`」。形の合わない行は無視する | なし | 必須 |
+| `--log-dir` | `<path>` | `flows.jsonl` を読む folder。無ければ 0 件として数える | 上の既定の場所 | 任意 |
+
+```
+./target/release/packetdeath eval --labels labels.tsv --log-dir ./log
+```
+
+### filterlist と allowlist-convert：一覧を変換する
+
+どちらも file を読んで書くだけで、ネットワークには出ません。
+`filterlist` は EasyList 形式を blocklist に、`allowlist-convert` は公開の allowlist(Microsoft の JSON、1 行 1 domain、Adblock Plus の `@@` 形式)を allowlist に変えます。
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--in` | `<path>` か `-` | 読む file。`-` は標準入力 | なし | 必須 |
+| `--out` | `<path>` か `-` | 書く file。`-` は標準出力 | なし | 必須 |
+
+```
+./target/release/packetdeath filterlist --in easylist.txt --out blocklist.txt
+```
+
+### service-install と service-uninstall：Windows サービスの登録と削除
+
+`service-install` は管理者の PowerShell で打ちます。
+受け取った option は、サービスの起動の引数に書き込まれ、`service-run` に渡ります。
+`service-uninstall` は option を取りません。
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--log-dir` | `<path>` | サービスが `flows.jsonl` と `service.log` を置く folder | なし | 必須 |
+| `--pcapng` | `<path>` | 読む記録の file(前の節)。渡さないと、サービスは何も記録も遮断もしない | なし | 任意 |
+| `--blocklist` | `<path>` | 止める名前の一覧。1 つだけ | なし(空の一覧) | 任意 |
+| `--allowlist` | `<path>` | 何があっても通す名前の一覧。1 つだけ | なし(空の一覧) | 任意 |
+
+```
+& 'C:\Program Files\packetdeath\packetdeath.exe' service-install --log-dir 'C:\ProgramData\packetdeath' --pcapng 'C:\ProgramData\packetdeath\capture.pcapng' --blocklist 'C:\ProgramData\packetdeath\blocklist.txt'
+& 'C:\Program Files\packetdeath\packetdeath.exe' service-uninstall
+```
+
+### proxy：中継役として通信を受ける
+
+管理者権限は要りません。
+Windows でも動きます。
+
+| option | 値 | 何をするか | 既定値 | 必須 | OS |
+|---|---|---|---|---|---|
+| `--listen` | `addr:port` | 通信を受ける IP とポート。`0.0.0.0` を黙って開かないよう、既定を置いていない | なし | 必須 | どちらも |
+| `--blocklist` | `<path>` | 止める名前の一覧。複数回 | なし(空の一覧) | 任意 | どちらも |
+| `--allowlist` | `<path>` | 何があっても通す名前の一覧 | なし(空の一覧) | 任意 | どちらも |
+| `--iplist` | `<path>` | 止める IP と CIDR の一覧。複数回 | なし(空の一覧) | 任意 | どちらも |
+| `--av` | `<path>` | 外の検査の道具が書いた `av.jsonl` | なし(空) | 任意 | どちらも |
+| `--deny` | `blackhole` か `403` | 止めたときの返し方。`blackhole` は繋がったふりをして黙る。`403` は `403 Forbidden` を返して閉じる | `blackhole` | 任意 | どちらも |
+| `--allow-from` | CIDR | 接続を受ける相手の範囲。複数回。1 つでも渡すと既定は使われず、渡した範囲だけになる。CIDR として読めない値は `[warn]`(「--allow-from の値が CIDR として読めない」)を出して捨てる。全部が読めないと 0 件になり、誰の接続も受け付けない | `127.0.0.0/8`、`::1/128`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16` | 任意 | どちらも |
+| `--log-dir` | `<path>` | `flows.jsonl` などを置く folder | 上の既定の場所 | 任意 | どちらも |
+| `--mitm-list` | `<path>` | 暗号化された通信を開く宛先の一覧。`--ca-dir` と `--clamd` の 3 つが揃ったときだけ働く | なし | 任意 | Linux。Windows では `[warn]` を出して無効 |
+| `--ca-dir` | `<path>` | 通信を開くための CA(証明書を発行する側)の鍵と証明書を置く folder | なし | 3 つ組 | Linux。同上 |
+| `--clamd` | socket の path か `addr:port` | ウイルス検査の `clamd` の場所 | なし | 3 つ組 | Linux。同上 |
+| `--distrust` | `<path>` | 不信な証明書の一覧。載った証明書の鎖を使う宛先を断つ。複数回 | なし | 任意 | Linux。Windows では `[warn]` を出して無効 |
+| `--watch-distrust` | `<path>` | `--distrust` と同じ一覧を、止めずに `watch.jsonl` へ記録するだけにする。複数回 | なし | 任意 | Linux。同上 |
+| `--watch-blocklist` | `<path>` | blocklist の当たりを、止めずに `watch.jsonl` へ記録するだけにする。複数回 | なし | 任意 | Linux。同上 |
+| `--watch-iplist` | `<path>` | iplist の当たりを、止めずに `watch.jsonl` へ記録するだけにする。複数回 | なし | 任意 | Linux。同上 |
+| `--probe-chains` | 値なし | 通信を開かない宛先にも、packetdeath が別に TLS を張って証明書の鎖を読む。宛先の名前を平文の SNI で送る | 切 | 任意 | Linux。同上 |
+| `--defense-off` | `<path>` | この file が在る間、不信の一覧と鎖の確認による遮断を止め、記録だけにする(`touch <path>` で入り、消せば戻る) | なし | 任意 | Linux。同上 |
+| `--breaker-hosts` | 1 以上の整数 | 1 つの一覧が 10 分に止めてよい宛先の数。超えるとその一覧を見張りだけに落とす | 5 | 任意 | Linux。同上 |
+
+```
+./target/release/packetdeath proxy --listen 127.0.0.1:8899 --blocklist blocklist.txt --allowlist allowlist.txt --deny 403 --log-dir ./log
+```
+
+`--mitm-list`、`--ca-dir`、`--clamd` は、1 つか 2 つだけ渡すと開く機能が無効のまま起動し、足りない option の名前を `[warn]` に出します。
+詳しい説明は「暗号化された通信を開く仕組み(MITM)」と「能動防御」の節にあります。
+
+### defense-report：見張りの記録を数える
+
+記録を読むだけで、通信も file も変えません。
+`--flows` か `--watch` のどちらか 1 つを必ず渡します(両方でも、どちらも無しでも失敗する)。
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--flows` | `<path>` | `flows.jsonl`。過去の記録に一覧を当てて、当たる数を数える | なし | `--flows` か `--watch` |
+| `--watch` | `<path>` | `watch.jsonl`。source ごとに当たりを数え、止める側へ移してよいかを `promote=yes` か `no` で示す | なし | 同上 |
+| `--blocklist` | `<path>` | `--flows` と一緒に使う blocklist。複数回 | なし | 任意 |
+| `--iplist` | `<path>` | `--flows` と一緒に使う iplist。複数回 | なし | 任意 |
+| `--allowlist` | `<path>` | 当たりのうち allowlist に載る数を別に数える。複数回 | なし | 任意 |
+| `--distrust` | `<path>` | `--watch` と一緒に使う不信の一覧。公開の信頼の起点(root)の行に `root=yes` を付ける。複数回 | なし | 任意 |
+| `--days` | 日数 | 移してよいと言うために要る記録の日数の下限。実際の記録の日数は、この値で水増しできない | 0(最低 7 日の記録が要る) | 任意 |
+
+```
+./target/release/packetdeath defense-report --flows ./log/flows.jsonl --blocklist blocklist.txt
+./target/release/packetdeath defense-report --watch ./log/watch.jsonl --days 7
+```
+
 ## 詳細な動作
 
 | したいこと | 使う物 |
@@ -558,6 +774,7 @@ packetdeath は pktmon を起動しません(止め忘れの事故を避ける�
 | 公開の一覧から悪性の宛先の一覧を作る | `scripts/pd-malware-feed.sh`(次の節) |
 
 `packetdeath` を引数なしで打つと、全 command の使い方が出ます。
+全 command と全 option の意味は、前の「command と option の一覧」の節にあります。
 
 記録の置き場は `--log-dir` で指定します。
 
