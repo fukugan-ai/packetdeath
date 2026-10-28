@@ -78,6 +78,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                             span { class: "auth-control",
                                 PersonIcon {}
                                 input {
+                                    r#type: "text", id: "username", name: "username",
                                     value: "{name}",
                                     oninput: move |event| name.set(event.value()),
                                     autocomplete: "username", maxlength: 64, required: true,
@@ -90,6 +91,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                             span { class: "auth-control auth-control-password",
                                 LockIcon {}
                                 input {
+                                    id: "password", name: if first_run { "new-password" } else { "password" },
                                     r#type: if reveal() { "text" } else { "password" },
                                     value: "{password}",
                                     oninput: move |event| password.set(event.value()),

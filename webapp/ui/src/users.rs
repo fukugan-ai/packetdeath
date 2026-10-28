@@ -87,9 +87,9 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
                 }
             }
             form { class: "card create", onsubmit: create,
-                input { value: "{new_name}", placeholder: "{t(&l, \"name\")}", maxlength: 64, required: true, autocomplete: "off",
+                input { r#type: "text", id: "new-username", name: "username", value: "{new_name}", placeholder: "{t(&l, \"name\")}", maxlength: 64, required: true, autocomplete: "username",
                     oninput: move |event| new_name.set(event.value()) }
-                input { r#type: "password", value: "{new_password}", placeholder: "{t(&l, \"password_new\")}", minlength: "12", required: true, autocomplete: "new-password",
+                input { r#type: "password", id: "new-user-password", name: "new-password", value: "{new_password}", placeholder: "{t(&l, \"password_new\")}", minlength: "12", required: true, autocomplete: "new-password",
                     oninput: move |event| new_password.set(event.value()) }
                 select { value: "{new_role}", onchange: move |event| new_role.set(event.value()),
                     for role in ROLES { option { key: "{role}", value: "{role}", "{word(&l, \"role\", role)}" } }
@@ -122,11 +122,13 @@ fn UserRow(row: Row, lang: Signal<String>, act: Callback<(&'static str, String, 
                 button { class: "quiet", r#type: "button",
                     onclick: move |_| act.call(("PATCH", off_path.clone(), json!({"disabled": toggled}))),
                     "{t(&l, switch_key)}" }
-                input { r#type: "password", value: "{password}", placeholder: "{t(&l, \"password_new\")}", autocomplete: "new-password",
-                    oninput: move |event| password.set(event.value()) }
-                button { class: "quiet", r#type: "button",
-                    onclick: move |_| { act.call(("PATCH", pass_path.clone(), json!({"password": password()}))); password.set(String::new()); },
-                    "{t(&l, \"set_password\")}" }
+                form { class: "actions",
+                    onsubmit: move |event| { event.prevent_default(); act.call(("PATCH", pass_path.clone(), json!({"password": password()}))); password.set(String::new()); },
+                    input { r#type: "text", name: "username", value: "{row.name}", autocomplete: "username", hidden: true, readonly: true }
+                    input { r#type: "password", name: "new-password", value: "{password}", placeholder: "{t(&l, \"password_new\")}", minlength: "12", required: true, autocomplete: "new-password",
+                        oninput: move |event| password.set(event.value()) }
+                    button { class: "quiet", r#type: "submit", "{t(&l, \"set_password\")}" }
+                }
                 button { class: "quiet danger", r#type: "button",
                     onclick: move |_| act.call(("DELETE", drop_path.clone(), json!({}))),
                     "{t(&l, \"remove\")}" }
