@@ -113,3 +113,13 @@ feed の license と利用条件は配布元のものなので、各 feed の fi
 - loopback、link-local、multicast、この機械の address、gateway、resolver、private の宛先は、policy が `drop` でも落ちない。private を落としたいときだけ `--ips-allow-private` を足す。
 - Suricata が止まると `eve.json` が増えない。`--eve-stale`（既定 900 秒）の後に `stale` が `ips.jsonl` と標準エラーに 1 回出る。
 - `ips.jsonl` に署名の文と通信の中身は書かない。
+
+## 管理画面と WAF の canary を本番へ入れる運用チェックリスト
+
+管理画面（`webapp/`）と、記録だけの WAF（`--mode detect`）を、無害な upstream の前に置く手順である。どれも `systemctl disable --now` の 1 つで戻る。
+
+1. 管理画面：`webapp/deploy/packetdeath-webapp.service` の雛形の account 名と path を替えて `/etc/systemd/system/` に置く。binary は `webapp/` の `cargo build --release`、画面は `webapp/ui/build.sh` で作る。`systemctl enable --now packetdeath-webapp` の後に `curl -s http://127.0.0.1:8088/healthz` が `ok` を返す。
+2. 最初の管理者：`needs_register` が `true` の間は、127.0.0.1 に届く誰でも最初の管理者になれる。unit を起こしたら、すぐ自分で登録する。
+3. WAF の canary：無害な静的ページ（`miniserve` など）を 127.0.0.1 の別 port に置き、`packetdeath waf --listen 127.0.0.1:9100 --upstream 127.0.0.1:9101 --mode detect --log-dir <dir>` を unit にする。clean な request が `pass`、攻撃の形の request が `detect`（forward される）で `waf.jsonl` に出る。
+4. 画面から見る：`waf.jsonl` を、管理画面の `--logs` の folder に link する（`ln -s <dir>/waf.jsonl <logs>/waf.jsonl`）。
+5. 戻す：`systemctl disable --now packetdeath-webapp packetdeath-waf-canary`。`--mode block` へ上げるのは、`waf-report` で誤検知を読み、`--exclusions` で外してからにする。
