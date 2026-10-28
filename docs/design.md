@@ -1060,6 +1060,17 @@ build に使う依存は `nfq` と同じ形で Linux target に限る（`[target
 依存木ごと unsafe が 0 件の TLS は、表のとおり存在しない。provider は C か asm か unsafe のどれかを含み、unsafe が無いのは alpha で未監査の rustls-rustcrypto だけである。
 この読みが違えば、段階8 は止まる。
 
+### 依存の版
+
+TLS の部品（rustls、rcgen、aws-lc-rs、x509-parser）と webapp の axum、argon2 は、`=` で固定せず、下限だけを置く。
+`=` があると `cargo update` が修正版を選べず、依存の脆弱性の修正が手作業の書き換えを待つことになる。
+再現性は `Cargo.lock` が持つので、固定は要らない。
+wasm-bindgen の系だけは、入れ替える CLI の版と揃える必要があるので `=` を残す。
+
+毎週月曜 09:00 の `update-check` が、両方の `Cargo.lock` について `cargo update --dry-run` と `cargo audit` を `~/.local/state/update-check/report.log` に書く。
+修正版が出ていれば、その週のうちに `cargo update`、全 test、本番への入れ替えを打つ。
+戻し方は、Cargo.toml に `=` を戻すことである（`Cargo.lock` は動かない）。
+
 **tokio は足さない。**段階7 は接続ごとの thread で書かれ、`block` と `observe` も同期である。非同期の runtime を足すと依存が2系統に割れる。
 復号した通信の処理は、1接続で1 request を順に処理する形（後述）なので、同期の thread で足りる。rustls の `StreamOwned` が std の `TcpStream` の上でそのまま動く。
 この選択は WebSocket と HTTP/2 を捨てる代償を払う。捨てた物を見つけたときの扱いは「復号した通信の扱い」に書く。

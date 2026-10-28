@@ -27,14 +27,17 @@ nfq = "0.2"
 # Stage 8 (MITM). docs/design.md "TLS の部品" fixes the crates, versions and
 # features: one crypto provider (aws-lc-rs) shared by rustls and rcgen, no
 # openssl, no tokio. Linux only, like nfq: the production proxy runs on Linux.
-rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
-rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "pem", "aws_lc_rs", "x509-parser"] }
+# No `=` pin on the TLS chain: Cargo.lock already fixes what is built, and an
+# exact pin makes `cargo update` skip the security fixes (rustls sat on 0.23.45
+# for 25 days). docs/design.md "依存の版".
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["crypto", "pem", "aws_lc_rs", "x509-parser"] }
 webpki-roots = "1"
-aws-lc-rs = "=1.18.1"
+aws-lc-rs = "1.18.1"
 # Stage 10 (active defense). Reads the SPKI, issuer and serial of the
 # certificates a server sends. Already in Cargo.lock through rcgen, so the
 # package count does not change.
-x509-parser = "=0.18.1"
+x509-parser = "0.18.1"
 
 # サービス登録・起動時遅延・失敗時自動再起動（`sc create` 相当）専用。
 # MIT OR Apache-2.0。内部で Win32 API 呼び出しに `unsafe` を使うが、
