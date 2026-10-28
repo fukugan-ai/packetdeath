@@ -1,0 +1,3 @@
+# Suricata signature ids to drop on sight, one per line. Empty on purpose:
+# the IPS policy decides by severity, and a sid is added here only after
+# `ips-report` shows it as observed-only and harmless to drop.

@@ -1,0 +1,2 @@
+# The only way to rescue a false positive: {"rule":942100,"path_prefix":"/api/search","target":"query"}
+# Empty on purpose: an exclusion is added only after waf-report shows the same rule firing on the same path.

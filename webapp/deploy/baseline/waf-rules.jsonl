@@ -1,0 +1,3 @@
+# Your own WAF rules, one JSON object per line: id, target, pattern, severity, paranoia, message.
+# The 44 built-in rules (SQL injection, XSS, path traversal, command injection, protocol abuse) are always on;
+# a rule here with the same id replaces the built-in one. Empty on purpose.

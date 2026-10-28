@@ -1,0 +1,9 @@
+# Destinations the IPS never drops, on top of the built-in protection
+# (loopback, link-local, multicast, this host, the default gateway and the resolvers in /etc/resolv.conf).
+# Public DNS resolvers: dropping one cuts name resolution for every device behind this host.
+1.1.1.1/32
+1.0.0.1/32
+8.8.8.8/32
+8.8.4.4/32
+9.9.9.9/32
+149.112.112.112/32

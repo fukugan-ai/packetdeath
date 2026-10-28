@@ -26,6 +26,17 @@ fn codes_of(body: &Value) -> Option<Stage> {
     Some(Stage::Codes(rows.iter().filter_map(|row| row.as_str().map(str::to_owned)).collect()))
 }
 
+/// The otpauth address as a QR code in SVG, dark modules on a white square with the quiet zone the scanners need.
+fn qr_svg(uri: &str) -> Result<String, String> {
+    let code = qrcode::QrCode::new(uri.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(code
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(224, 224)
+        .dark_color(qrcode::render::svg::Color("#000000"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build())
+}
+
 /// What adding a passkey came to.
 enum PasskeyAdded {
     /// It was the first second factor: the recovery codes are shown once.
@@ -159,6 +170,11 @@ pub fn Security(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Eleme
                     p { class: "hint", "{t(&l, \"mfa_passkey_note\")}" }
                 },
                 Stage::Pending { secret, uri } => rsx! {
+                    p { "{t(&l, \"mfa_scan\")}" }
+                    match qr_svg(&uri) {
+                        Ok(svg) => rsx! { div { id: "mfa-qr", class: "qr", role: "img", aria_label: "{t(&l, \"mfa_qr_alt\")}", dangerous_inner_html: "{svg}" } },
+                        Err(why) => rsx! { p { class: "notice notice-danger", id: "mfa-qr-failed", "{why}" } },
+                    }
                     p { "{t(&l, \"mfa_secret\")}" }
                     p { code { id: "mfa-secret", "{secret}" } }
                     p { a { id: "mfa-uri", href: "{uri}", "{t(&l, \"mfa_open_app\")}" } }
@@ -194,6 +210,20 @@ mod tests {
     fn a_begin_answer_needs_the_secret_and_the_address() {
         assert_eq!(pending_of(&json!({"secret": "S", "uri": "otpauth://x"})), Some(Stage::Pending { secret: "S".into(), uri: "otpauth://x".into() }));
         assert_eq!(pending_of(&json!({"secret": "S"})), None);
+    }
+
+    #[test]
+    fn an_otpauth_address_becomes_an_svg_with_a_white_square_and_dark_modules() -> Result<(), String> {
+        let svg = qr_svg("otpauth://totp/packetdeath:alice?secret=JBSWY3DPEHPK3PXP&issuer=packetdeath")?;
+        assert!(svg.contains("<svg"), "{svg}");
+        assert!(svg.contains("#ffffff") && svg.contains("#000000"), "{svg}");
+        Ok(())
+    }
+
+    #[test]
+    fn an_address_too_long_for_a_qr_code_is_an_error() {
+        let too_long = "x".repeat(8000);
+        assert!(qr_svg(&too_long).is_err());
     }
 
     #[test]

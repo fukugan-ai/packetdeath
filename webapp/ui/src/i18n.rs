@@ -40,6 +40,8 @@ const WORDS: &[(&str, &str, &str)] = &[
     ("mfa_on", "第二要素は有効です", "The second factor is on"),
     ("mfa_off", "第二要素はまだ有効ではありません。パスワードだけでは、運用者と管理者は設定を変えられません", "The second factor is not on yet. With a password alone, operators and administrators cannot change settings"),
     ("mfa_begin", "認証アプリで始める", "Set up an authenticator app"),
+    ("mfa_scan", "認証アプリで下の QR コードを読み取ってください", "Scan the QR code below with your authenticator app"),
+    ("mfa_qr_alt", "認証アプリに登録する QR コード", "QR code for the authenticator app"),
     ("mfa_secret", "認証アプリに、この秘密の文字列を入力します（または下のリンクを開きます）", "Enter this secret in your authenticator app (or open the link below)"),
     ("mfa_open_app", "認証アプリで開く", "Open in the authenticator app"),
     ("mfa_code", "アプリに表示された 6 桁のコード", "The 6-digit code the app shows"),

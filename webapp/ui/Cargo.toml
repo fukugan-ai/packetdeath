@@ -23,6 +23,8 @@ wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "=0.4.79"
 # The browser's passkey API takes and gives buffers: js-sys reaches them, data-encoding turns them to and from base64url text.
 js-sys = "=0.3.106"
+# The authenticator-app setup shows its otpauth address as a QR code (an SVG string, no image decoder).
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 data-encoding = "2"
 web-sys = { version = "=0.3.106", features = ["Document", "Element", "HtmlElement", "RequestCredentials", "Window", "Storage", "Location", "Navigator", "console"] }
 
