@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use serde_json::Value;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::i18n::{error_word, t};
+use crate::i18n::{error_line, t};
 use crate::{api, Me};
 
 /// A JSON object of counts as sorted rows, biggest first.
@@ -75,7 +75,7 @@ pub fn Status(lang: Signal<String>, me: Signal<Option<Me>>) -> Element {
             match api::get("/api/status").await {
                 Ok(body) => data.set(Some(body)),
                 Err(failed) if failed.is_signed_out() => me.set(None),
-                Err(failed) => error.set(error_word(&lang(), failed.status)),
+                Err(failed) => error.set(error_line(&lang(), &failed)),
             }
         });
     });

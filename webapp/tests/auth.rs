@@ -34,6 +34,7 @@ async fn pk191_the_file_holds_a_hash_and_a_wrong_answer_is_the_same_for_every_ac
     assert_eq!(wrong.status, StatusCode::UNAUTHORIZED);
     assert_eq!((wrong.status, wrong.text.as_str()), (unknown.status, unknown.text.as_str()));
     assert!(wrong.headers.get("set-cookie").is_none());
+    assert_eq!(wrong.body()?["code"], "PD_AUTH_LOGIN");
     Ok(())
 }
 
@@ -125,6 +126,25 @@ async fn pk199_only_an_administrator_manages_users_and_the_last_one_stays() -> R
     }
     let gone = r.call(Method::DELETE, "/api/users/otto", Some(&admin), true, None).await?;
     assert_eq!(gone.status, StatusCode::OK);
+    Ok(())
+}
+
+#[tokio::test]
+async fn every_refusal_names_the_place_it_came_from() -> Result<(), Fault> {
+    let r = rig("codes")?;
+    let short = r.call(Method::POST, "/api/register", None, false, Some(json!({"name": "alice", "password": "short"}))).await?;
+    assert_eq!((short.status, short.body()?["code"].clone()), (StatusCode::UNPROCESSABLE_ENTITY, json!("PD_USER_PASSWORD")));
+    let odd = r.call(Method::POST, "/api/register", None, false, Some(json!({"name": "a b", "password": PASSWORD}))).await?;
+    assert_eq!(odd.body()?["code"], "PD_USER_NAME");
+    let admin = r.register("alice").await?;
+    let closed = r.call(Method::POST, "/api/register", None, false, Some(json!({"name": "m", "password": PASSWORD}))).await?;
+    assert_eq!(closed.body()?["code"], "PD_USER_REGISTER_CLOSED");
+    let none = r.call(Method::GET, "/api/users", None, false, None).await?;
+    assert_eq!(none.body()?["code"], "PD_AUTH_NO_COOKIE");
+    let no_csrf = r.call(Method::POST, "/api/users", Some(&admin), false, Some(json!({"name": "x", "password": PASSWORD, "role": "viewer"}))).await?;
+    assert_eq!(no_csrf.body()?["code"], "PD_AUTH_CSRF");
+    let unknown = r.call(Method::GET, "/api/settings/nothing", Some(&admin), false, None).await?;
+    assert_eq!(unknown.body()?["code"], "PD_SETTING_UNKNOWN");
     Ok(())
 }
 

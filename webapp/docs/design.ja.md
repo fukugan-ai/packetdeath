@@ -109,6 +109,33 @@
 
 運用の手順は `operations.ja.md`、本番の unit は `deploy/packetdeath-webapp.service` にある。
 
+### エラー番号
+
+server の拒否は、すべて `{"error": 文, "code": 番号}` で返る。番号は `PD_<部位>_<理由>` で、画面は「言葉 [番号] server の文」の 1 行で見せる。番号から、どの検査が止めたかが分かる。framework が返す拒否（JSON の欄が足りないなど）は `PD_HTTP_<状態>`、server に届かないときは `PD_UI_NETWORK` になる。
+
+| 番号 | 状態 | 止めた検査 |
+|---|---|---|
+| `PD_AUTH_NO_COOKIE` | 401 | session の cookie が無い |
+| `PD_AUTH_SESSION_ENDED` | 401 | session が切れた、または無い |
+| `PD_AUTH_LOGIN` | 401 | account か password が違う（有無は区別しない） |
+| `PD_AUTH_LIMITED` | 429 | 失敗が続いたため待たされている |
+| `PD_AUTH_ROLE` | 403 | 役が足りない |
+| `PD_AUTH_CSRF` | 403 | CSRF token が無い、または違う |
+| `PD_AUTH_COOKIE`、`PD_AUTH_SESSION_START` | 500 | cookie または session を作れない |
+| `PD_USER_NAME` | 422 | 名前が 1 から 64 文字の英数字と `.` `_` `-` ではない |
+| `PD_USER_PASSWORD` | 422 | password が 12 から 256 文字ではない |
+| `PD_USER_EXISTS` | 409 | その名前は使われている |
+| `PD_USER_REGISTER_CLOSED` | 409 | 利用者がいるので最初の管理者の登録はできない |
+| `PD_USER_LAST_ADMIN` | 409 | 最後の有効な管理者を消す、無効にする、役を下げる |
+| `PD_USER_NOT_FOUND` | 404 | その利用者がいない |
+| `PD_USER_STORE` | 500 | 利用者の file を書けない |
+| `PD_SETTING_UNKNOWN` | 404 | その設定の種類は無い |
+| `PD_SETTING_TOO_LARGE` | 413 | 1 MiB を超える |
+| `PD_SETTING_INVALID` | 422 | 読めない行がある（行番号つき） |
+| `PD_SETTING_IO` | 500 | 設定の file を書けない |
+| `PD_STATUS_READ` | 500 | log を読めない |
+| `PD_PAGE_NOT_FOUND` | 404 | 画面の file が無い |
+
 ### 採らない手段
 
 | 採らない | 理由 |

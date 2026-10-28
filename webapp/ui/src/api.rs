@@ -18,13 +18,15 @@ pub struct BadLine {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ApiError {
     pub status: u16,
+    /// The server's `PD_<PART>_<REASON>`; `PD_HTTP_<status>` when the answer carried none (a framework refusal), `PD_UI_NETWORK` when no answer came.
+    pub code: String,
     pub message: String,
     pub lines: Vec<BadLine>,
 }
 
 impl ApiError {
     fn network() -> Self {
-        Self { status: 0, message: String::from("network"), lines: Vec::new() }
+        Self { status: 0, code: String::from("PD_UI_NETWORK"), message: String::from("network"), lines: Vec::new() }
     }
 
     pub fn is_signed_out(&self) -> bool {
@@ -55,16 +57,20 @@ async fn finish(builder: Result<Request, gloo_net::Error>) -> Result<Value, ApiE
     // An answer that is not JSON (an empty body) is an answer with no fields; the status decides.
     let body = serde_json::from_str::<Value>(&text).ok();
     if (200..300).contains(&status) {
-        return body.ok_or(ApiError { status, message: String::from("not json"), lines: Vec::new() });
+        return body.ok_or(ApiError { status, code: String::from("PD_UI_NOT_JSON"), message: String::from("not json"), lines: Vec::new() });
     }
-    let (mut message, mut lines) = (String::from("error"), Vec::new());
+    // An answer with no fields of ours (a framework refusal such as a missing JSON field) keeps the status as its code and the text as its sentence.
+    let (mut code, mut message, mut lines) = (format!("PD_HTTP_{status}"), text.clone(), Vec::new());
     if let Some(body) = &body {
-        if let Some(text) = body.get("error").and_then(Value::as_str) {
-            message = text.to_owned();
+        if let Some(found) = body.get("error").and_then(Value::as_str) {
+            message = found.to_owned();
+        }
+        if let Some(found) = body.get("code").and_then(Value::as_str) {
+            code = found.to_owned();
         }
         lines = lines_of(body);
     }
-    Err(ApiError { status, message, lines })
+    Err(ApiError { status, code, message, lines })
 }
 
 fn with_cookie(builder: RequestBuilder) -> RequestBuilder {

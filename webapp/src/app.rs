@@ -43,12 +43,12 @@ pub struct AppState {
 
 pub type Shared = Arc<AppState>;
 
-/// An answer that is an error: a status and a sentence.
-pub struct Fail(pub StatusCode, pub String);
+/// An answer that is an error: a status, a code that names the place it came from (`PD_<PART>_<REASON>`, listed in `webapp/docs/design.ja.md`) and a sentence.
+pub struct Fail(pub StatusCode, pub &'static str, pub String);
 
 impl IntoResponse for Fail {
     fn into_response(self) -> Response {
-        (self.0, Json(json!({"error": self.1}))).into_response()
+        (self.0, Json(json!({"error": self.2, "code": self.1}))).into_response()
     }
 }
 
@@ -90,22 +90,22 @@ fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0_u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn fail(status: StatusCode, text: &str) -> Fail {
-    Fail(status, text.to_owned())
+fn fail(status: StatusCode, code: &'static str, text: &str) -> Fail {
+    Fail(status, code, text.to_owned())
 }
 
 /// The signed-in user, or 401.
 pub fn who(state: &AppState, headers: &HeaderMap) -> Result<Who, Fail> {
-    let id = cookie_id(headers).ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "sign in first"))?;
+    let id = cookie_id(headers).ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "PD_AUTH_NO_COOKIE", "sign in first"))?;
     let found = lock(&state.sessions).touch(&id, state.now());
-    found.ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "sign in first"))
+    found.ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "PD_AUTH_SESSION_ENDED", "sign in first"))
 }
 
 /// A read: a session and at least `min`.
 pub fn reader(state: &AppState, headers: &HeaderMap, min: Role) -> Result<Who, Fail> {
     let me = who(state, headers)?;
     if me.role < min {
-        return Err(fail(StatusCode::FORBIDDEN, "your role cannot do that"));
+        return Err(fail(StatusCode::FORBIDDEN, "PD_AUTH_ROLE", "your role cannot do that"));
     }
     Ok(me)
 }
@@ -115,7 +115,7 @@ pub fn writer(state: &AppState, headers: &HeaderMap, min: Role) -> Result<Who, F
     let me = reader(state, headers, min)?;
     let sent = headers.get("x-csrf-token").and_then(|v| std::str::from_utf8(v.as_bytes()).ok());
     if !sent.is_some_and(|token| same(token, &me.csrf)) {
-        return Err(fail(StatusCode::FORBIDDEN, "the CSRF token is missing or wrong"));
+        return Err(fail(StatusCode::FORBIDDEN, "PD_AUTH_CSRF", "the CSRF token is missing or wrong"));
     }
     Ok(me)
 }

@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use wasm_bindgen_futures::spawn_local;
 
 use crate::api::{self, BadLine};
-use crate::i18n::{error_word, t};
+use crate::i18n::{error_line, error_word, t};
 use crate::Me;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -69,7 +69,7 @@ pub fn Editor(part: String, lang: Signal<String>, user: Me, me: Signal<Option<Me
                     kinds.set(mine);
                 }
                 Err(failed) if failed.is_signed_out() => me.set(None),
-                Err(failed) => error.set(error_word(&lang(), failed.status)),
+                Err(failed) => error.set(error_line(&lang(), &failed)),
             }
         });
     });
@@ -88,7 +88,7 @@ pub fn Editor(part: String, lang: Signal<String>, user: Me, me: Signal<Option<Me
                     None => error.set(error_word(&lang(), 0)),
                 },
                 Err(failed) if failed.is_signed_out() => me.set(None),
-                Err(failed) => error.set(error_word(&lang(), failed.status)),
+                Err(failed) => error.set(error_line(&lang(), &failed)),
             }
         });
     });
@@ -105,7 +105,7 @@ pub fn Editor(part: String, lang: Signal<String>, user: Me, me: Signal<Option<Me
                 Ok(_) => done.set(t(&lang(), "saved")),
                 Err(failed) if failed.is_signed_out() => me.set(None),
                 Err(failed) => {
-                    error.set(error_word(&lang(), failed.status));
+                    error.set(error_line(&lang(), &failed));
                     bad.set(failed.lines);
                 }
             }

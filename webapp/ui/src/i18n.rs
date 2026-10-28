@@ -3,6 +3,8 @@
 //! A key with no word is shown as the key itself, so a missing word is seen on
 //! the screen instead of leaving a blank.
 
+use crate::api::ApiError;
+
 /// key, Japanese, English.
 const WORDS: &[(&str, &str, &str)] = &[
     ("app", "packetdeath コンソール", "packetdeath console"),
@@ -89,9 +91,20 @@ pub fn error_word(lang: &str, status: u16) -> String {
     t(lang, "err_error")
 }
 
+/// The line a screen shows for a failed call: the word, the code that names the place it came from, and the server's sentence.
+pub fn error_line(lang: &str, failed: &ApiError) -> String {
+    format!("{} [{}] {}", error_word(lang, failed.status), failed.code, failed.message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_error_line_carries_the_code_and_the_servers_sentence() {
+        let failed = ApiError { status: 422, code: String::from("PD_USER_PASSWORD"), message: String::from("the password must be 12 to 256 characters"), lines: Vec::new() };
+        assert_eq!(error_line("en", &failed), "The input was not accepted [PD_USER_PASSWORD] the password must be 12 to 256 characters");
+    }
 
     #[test]
     fn every_key_is_unique_and_has_both_languages() {

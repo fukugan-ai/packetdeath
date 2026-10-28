@@ -18,7 +18,7 @@ pub async fn health() -> &'static str {
 
 pub async fn status(State(state): State<Shared>, headers: HeaderMap) -> Reply {
     reader(&state, &headers, Role::Viewer)?;
-    let found = status::read(&state.log_dir).map_err(|why| Fail(StatusCode::INTERNAL_SERVER_ERROR, why))?;
+    let found = status::read(&state.log_dir).map_err(|why| Fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_STATUS_READ", why))?;
     Ok(Json(found).into_response())
 }
 
@@ -54,7 +54,7 @@ fn resolve(root: &FsPath, uri: &Uri) -> Option<PathBuf> {
 }
 
 pub async fn file(State(state): State<Shared>, uri: Uri) -> Reply {
-    let missing = || Fail(StatusCode::NOT_FOUND, String::from("not found"));
+    let missing = || Fail(StatusCode::NOT_FOUND, "PD_PAGE_NOT_FOUND", String::from("not found"));
     let root = state.static_dir.as_ref().ok_or_else(missing)?;
     let path = resolve(root, &uri).ok_or_else(missing)?;
     let kind = content_type(&path).ok_or_else(missing)?;

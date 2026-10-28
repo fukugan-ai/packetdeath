@@ -9,7 +9,7 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::api;
-use crate::i18n::{error_word, t};
+use crate::i18n::{error_line, error_word, t};
 use crate::mark::{LockIcon, Mark, PersonIcon};
 use crate::theme;
 use crate::{me_of, Me};
@@ -44,7 +44,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                     }
                     None => error.set(error_word(&lang(), 0)),
                 },
-                Err(failed) => error.set(error_word(&lang(), failed.status)),
+                Err(failed) => error.set(error_line(&lang(), &failed)),
             }
             busy.set(false);
         });

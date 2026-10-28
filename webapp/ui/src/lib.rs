@@ -21,7 +21,7 @@ pub mod status;
 pub mod theme;
 pub mod users;
 
-use crate::i18n::{error_word, t};
+use crate::i18n::{error_line, t};
 use crate::shell::Shell;
 use crate::signin::Signin;
 
@@ -74,7 +74,7 @@ fn App() -> Element {
                     me.set(me_of(&body["me"]));
                     first_run.set(Some(body["needs_register"] == true));
                 }
-                Err(failed) => error.set(error_word(&lang(), failed.status)),
+                Err(failed) => error.set(error_line(&lang(), &failed)),
             }
         });
     });

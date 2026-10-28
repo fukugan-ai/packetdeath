@@ -21,19 +21,19 @@ pub struct Body {
 }
 
 fn setting_fail(error: SettingError) -> Fail {
-    let status = match error {
-        SettingError::Unknown => StatusCode::NOT_FOUND,
-        SettingError::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
-        SettingError::Invalid(_) => StatusCode::UNPROCESSABLE_ENTITY,
-        SettingError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    let (status, code) = match error {
+        SettingError::Unknown => (StatusCode::NOT_FOUND, "PD_SETTING_UNKNOWN"),
+        SettingError::TooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "PD_SETTING_TOO_LARGE"),
+        SettingError::Invalid(_) => (StatusCode::UNPROCESSABLE_ENTITY, "PD_SETTING_INVALID"),
+        SettingError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "PD_SETTING_IO"),
     };
-    Fail(status, error.to_string())
+    Fail(status, code, error.to_string())
 }
 
 /// The refusal of an unreadable file: the sentence and each line with its reason.
 fn invalid(lines: &[(usize, String)]) -> Reply {
     let rows: Vec<_> = lines.iter().map(|(line, why)| json!({"line": line, "reason": why})).collect();
-    let body = json!({"error": format!("{} line(s) cannot be read", lines.len()), "lines": rows});
+    let body = json!({"error": format!("{} line(s) cannot be read", lines.len()), "code": "PD_SETTING_INVALID", "lines": rows});
     Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(body)).into_response())
 }
 

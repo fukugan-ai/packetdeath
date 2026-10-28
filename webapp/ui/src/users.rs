@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use wasm_bindgen_futures::spawn_local;
 
 use crate::api;
-use crate::i18n::{error_word, t, word};
+use crate::i18n::{error_line, t, word};
 use crate::Me;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -48,7 +48,7 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
             match api::get("/api/users").await {
                 Ok(body) => rows.set(rows_of(&body)),
                 Err(failed) if failed.is_signed_out() => me.set(None),
-                Err(failed) => error.set(error_word(&lang(), failed.status)),
+                Err(failed) => error.set(error_line(&lang(), &failed)),
             }
         });
     };
@@ -62,7 +62,7 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
             match api::send(method, &path, &csrf, &body).await {
                 Ok(_) => reload(),
                 Err(failed) if failed.is_signed_out() => me.set(None),
-                Err(failed) => error.set(error_word(&lang(), failed.status)),
+                Err(failed) => error.set(error_line(&lang(), &failed)),
             }
         });
     });

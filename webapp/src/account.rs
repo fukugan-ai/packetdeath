@@ -36,18 +36,20 @@ pub struct Change {
     pub password: Option<String>,
 }
 
-fn fail(status: StatusCode, text: &str) -> Fail {
-    Fail(status, text.to_owned())
+fn fail(status: StatusCode, code: &'static str, text: &str) -> Fail {
+    Fail(status, code, text.to_owned())
 }
 
 fn user_fail(error: UserError) -> Fail {
-    let status = match error {
-        UserError::BadName | UserError::WeakPassword => StatusCode::UNPROCESSABLE_ENTITY,
-        UserError::Exists | UserError::LastAdmin => StatusCode::CONFLICT,
-        UserError::NotFound => StatusCode::NOT_FOUND,
-        UserError::Store(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    let (status, code) = match error {
+        UserError::BadName => (StatusCode::UNPROCESSABLE_ENTITY, "PD_USER_NAME"),
+        UserError::WeakPassword => (StatusCode::UNPROCESSABLE_ENTITY, "PD_USER_PASSWORD"),
+        UserError::Exists => (StatusCode::CONFLICT, "PD_USER_EXISTS"),
+        UserError::LastAdmin => (StatusCode::CONFLICT, "PD_USER_LAST_ADMIN"),
+        UserError::NotFound => (StatusCode::NOT_FOUND, "PD_USER_NOT_FOUND"),
+        UserError::Store(_) => (StatusCode::INTERNAL_SERVER_ERROR, "PD_USER_STORE"),
     };
-    Fail(status, error.to_string())
+    Fail(status, code, error.to_string())
 }
 
 /// Write one audit line. A failure to write is reported on stderr and does not undo the change that was made.
@@ -60,12 +62,12 @@ fn note(state: &Shared, user: &str, action: &'static str, target: &str, ok: bool
 fn cookie_value(state: &Shared, id: &str, max_age: u64) -> Result<HeaderValue, Fail> {
     let secure = if state.secure { "; Secure" } else { "" };
     let text = format!("{COOKIE_NAME}={id}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}");
-    HeaderValue::from_str(&text).map_err(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "the cookie could not be built"))
+    HeaderValue::from_str(&text).map_err(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_AUTH_COOKIE", "the cookie could not be built"))
 }
 
 fn signed_in(state: &Shared, name: &str, role: Role) -> Reply {
     let started = lock(&state.sessions).start(name, role, state.now());
-    let (id, csrf) = started.map_err(|why| Fail(StatusCode::INTERNAL_SERVER_ERROR, why))?;
+    let (id, csrf) = started.map_err(|why| Fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_AUTH_SESSION_START", why))?;
     let cookie = cookie_value(state, &id, LIFETIME)?;
     let body = Json(json!({"name": name, "role": role, "csrf": csrf}));
     let mut res = body.into_response();
@@ -89,7 +91,7 @@ pub async fn register(State(state): State<Shared>, Json(body): Json<Credentials>
     {
         let mut users = lock(&state.users);
         if !users.is_empty() {
-            return Err(fail(StatusCode::CONFLICT, "the console already has users"));
+            return Err(fail(StatusCode::CONFLICT, "PD_USER_REGISTER_CLOSED", "the console already has users"));
         }
         users.create(&body.name, &body.password, Role::Admin, now).map_err(user_fail)?;
     }
@@ -98,7 +100,7 @@ pub async fn register(State(state): State<Shared>, Json(body): Json<Credentials>
 }
 
 fn too_many() -> Fail {
-    fail(StatusCode::TOO_MANY_REQUESTS, "too many failed sign-ins; try again later")
+    fail(StatusCode::TOO_MANY_REQUESTS, "PD_AUTH_LIMITED", "too many failed sign-ins; try again later")
 }
 
 pub async fn login(State(state): State<Shared>, Extension(source): Extension<Source>, Json(body): Json<Credentials>) -> Reply {
@@ -110,7 +112,7 @@ pub async fn login(State(state): State<Shared>, Extension(source): Extension<Sou
     let Some(role) = verified else {
         lock(&state.limiter).failed(&body.name, &source.0, now);
         note(&state, &body.name, "login", &body.name, false);
-        return Err(fail(StatusCode::UNAUTHORIZED, "the account or the password is wrong"));
+        return Err(fail(StatusCode::UNAUTHORIZED, "PD_AUTH_LOGIN", "the account or the password is wrong"));
     };
     lock(&state.limiter).succeeded(&body.name);
     note(&state, &body.name, "login", &body.name, true);
