@@ -1013,7 +1013,7 @@ The default of 5 for `--breaker-hosts` is provisional (ASSUMPTION) and will be d
 ### Terms of the imported lists
 
 OneCRL, Feodo Tracker and SSL Blacklist are fetched without a key.
-ThreatFox and URLhaus are for users authenticated at abuse.ch, so when the `--auth <key file>` file is missing or its mode is looser than `0600`, no request is sent to them.
+ThreatFox and URLhaus are for users authenticated at abuse.ch, so when the `--auth <key file>` file is missing, its mode is looser than `0600`, or the key is not 40 to 64 hex digits, no request is sent to them.
 In that case `malware-domains.txt` and `malware-ips.txt` stay as they were and grow stale, and the script ends with `rc=1`.
 Getting a key requires you to authenticate at abuse.ch yourself.
 
@@ -1042,8 +1042,10 @@ It runs with `curl`, `sh` and `jq`.
 | OneCRL (Mozilla's list of revoked certificates) | Not needed | Follows the publisher's terms |
 
 ThreatFox and URLhaus need an abuse.ch authentication key.
-Put the key in a file written as a curl configuration, set its mode to `0600`, and pass it with `--auth`.
-If the key file is missing or its mode is too loose, the script sends no request at all to these two feeds.
+Put the key in a file that holds the single line `header = "Auth-Key: <your key>"`, set its mode to `0600`, and pass it with `--auth`.
+abuse.ch puts the key inside the download address.
+The script hands that address to curl on its standard input, so the key appears neither in `ps` nor in a log.
+If the key file is missing, its mode is too loose, or the key has the wrong shape, the script sends no request at all to these two feeds.
 It prints a `[warn]` and keeps the previous lists.
 It chooses stale lists over breaking the terms.
 

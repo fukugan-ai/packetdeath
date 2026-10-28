@@ -825,13 +825,14 @@ feed の URL と license の名前は script 冒頭の comment が正本であ�
 
 | feed | URL | 取り出す物 | 行き先 |
 |---|---|---|---|
-| ThreatFox（CSV） | `https://threatfox.abuse.ch/export/csv/recent/` | `ioc_type` が `domain` の値と、`ip:port` の IP | domain と IP |
-| URLhaus（hostfile） | `https://urlhaus.abuse.ch/downloads/hostfile/` | 2列目の host | domain（IP の形なら IP） |
+| ThreatFox（CSV） | `https://threatfox-api.abuse.ch/v2/files/exports/<key>/recent.csv` | `ioc_type` が `domain` の値と、`ip:port` の IP | domain と IP |
+| URLhaus（hostfile） | `https://urlhaus-api.abuse.ch/v2/files/exports/<key>/hostfile.txt` | 2列目の host | domain（IP の形なら IP） |
 | Feodo Tracker | `https://feodotracker.abuse.ch/downloads/ipblocklist.txt` | 1行1 IP | IP |
 
 ThreatFox の `url` の行は取り込まない。URL の host は無料の file 置き場や正規の site であることがあり、host ごと落とすと誤遮断になるからである。
 IP は private、loopback、link-local、multicast、`0.0.0.0` を捨てる。feed が汚染されても、LAN と proxy 自身へ届かなくなる事故を起こさないためである。
-3つの URL の形は、実際に取って確かめてある（`実測`、2026-10-03）。ThreatFox は `ip:port` が 3357 行、`domain` が 2126 行で、Feodo は 5 行しか無い。IP の本体は ThreatFox が担う。
+3つの URL の形は、実際に取って確かめてある（`実測`、2026-10-22）。ThreatFox の `recent.csv` は `ip:port` が 3460 行、`domain` が 2548 行で、列は `"first_seen_utc", "ioc_id", "ioc_value", "ioc_type", ...` の順（値は `", "` で区切られ、`#` の行は header）。URLhaus の `hostfile.txt` は `127.0.0.1<TAB>host` が 475 行。Feodo は 5 行しか無い。IP の本体は ThreatFox が担う。
+ThreatFox と URLhaus の URL は key が path の一部である。key の入った URL は argv にも log にも載せず、取り出しの対象は変えない。
 
 各 file は、取得と変換の後に行数（`#` の行を除く）を数える。
 下限（domain は 1000、IP は 100。`--min-domains` と `--min-ips` で変える）を下回ったら、**書き換えずに前の file を残して** rc=1 で終わる。
@@ -858,7 +859,7 @@ IP は private、loopback、link-local、multicast、`0.0.0.0` を捨てる。fe
 | **PK-91** | `--blocklist a.txt --blocklist b.txt` で、b.txt だけに在る domain が block される | `printf 'a.example\n' > a.txt; printf 'b.example\n' > b.txt; packetdeath proxy --listen 127.0.0.1:8899 --blocklist a.txt --blocklist b.txt --deny 403 &` の後に `curl -sS -x http://127.0.0.1:8899 https://b.example/ 2>&1 \| grep -c 'CONNECT tunnel failed'; grep -c '"reason":"sni"' <log>` | `1`、`1` |
 | **PK-92** | `--iplist x.txt --iplist y.txt` で、y.txt だけに在る IP 宛てが block される（reason は `iplist`） | `printf '192.0.2.1\n' > x.txt; printf '127.0.0.1\n' > y.txt; packetdeath proxy --listen 127.0.0.1:8899 --iplist x.txt --iplist y.txt --deny 403 &` の後に、`127.0.0.1` で待つ上流へ `curl -sS -x http://127.0.0.1:8899 http://127.0.0.1:<port>/ -o /dev/null -w '%{http_code}\n'; grep -c '"reason":"iplist"' <log>` | `403`、`1` |
 | **PK-93** | 走行中に iplist を書き換えると 300 ms 後の判定が変わる（PK-74 の iplist 版） | `: > y.txt; packetdeath proxy --listen 127.0.0.1:8899 --iplist y.txt --deny 403 &` の後に PK-92 の curl（`200`）、続けて `printf '127.0.0.1\n' >> y.txt; sleep 0.4;` の後に同じ curl | 書き換え前 `200`、書き換え後 `403` |
-| **PK-94** | feed script が2 file を作り、行数が下限以上になる。network が無ければ `--from` で同じ検査が通る。取得に失敗したら前の file が残る（陰性対照）。key の file が無い間は ThreatFox と URLhaus を取らずに `[warn]` を出し、前の list を残す | `scripts/pd-malware-feed.sh --out <dir> --from <fixture> --min-domains 1 --min-ips 1; echo "rc=$?"; wc -l <dir>/malware-domains.txt <dir>/malware-ips.txt`。陰性対照は、壊れた raw を置いた `--from` で同じ command を打ち、`cksum <dir>/malware-*.txt` を前後で比べる。key の file が無い場合は、`--from` を付けずに記録用の偽の `curl` を先頭に置いた PATH で打ち、ThreatFox と URLhaus への request を数える（PK-143） | `--from`：`rc=0` で、2 file の `wc -l` が下限以上。陰性対照は `rc=1` で cksum が同じ。key 無し：ThreatFox と URLhaus への request が 0 件、`[warn]` が出る、2 file の cksum が前後で同じ |
+| **PK-94** | feed script が2 file を作り、行数が下限以上になる。network が無ければ `--from` で同じ検査が通る。取得に失敗したら前の file が残る（陰性対照）。key の file が無い間は ThreatFox と URLhaus を取らずに `[warn]` を出し、前の list を残す。key があっても本文が feed の形でなければ、取れなかった feed と同じに数え、前の list を残す | `scripts/pd-malware-feed.sh --out <dir> --from <fixture> --min-domains 1 --min-ips 1; echo "rc=$?"; wc -l <dir>/malware-domains.txt <dir>/malware-ips.txt`。陰性対照は、壊れた raw を置いた `--from` で同じ command を打ち、`cksum <dir>/malware-*.txt` を前後で比べる。key の file が無い場合は、`--from` を付けずに記録用の偽の `curl` を先頭に置いた PATH で打ち、ThreatFox と URLhaus への request を数える（PK-143） | `--from`：`rc=0` で、2 file の `wc -l` が下限以上。陰性対照は `rc=1` で cksum が同じ。key 無し：ThreatFox と URLhaus への request が 0 件、`[warn]` が出る、2 file の cksum が前後で同じ。壊れた本文（key あり）：`rc=1`、`body has no usable rows` の `[warn]` が 2、`malware-domains.txt` が前と同じ |
 
 実機の完了条件は、本番の proxy 経由で feed に載った domain へ繋ぐと、`flows.jsonl` に `"decision":"block"` が出ることである。
 この段階の実装では本番（`~/pd/`）を触らず、release binary を別の port で起動して同じ形を測る。
@@ -1631,8 +1632,8 @@ PC の通信で proxy を通らない物（PAC を読まない道具）は、Win
 | 段階8 の上流の TLS を張る所 | `rg -n 'fn connect_upstream' src/mitm.rs` | 1 箇所。handshake の後に鎖を読める | ─ |
 | 本番の proxy の 1 日（`ts` が 2026-10-21） | `grep -a` で `~/pd/log/flows.jsonl` | 31195 flow、block 1353（reason は全部 `sni`）、pass 29842、pass の host の種類 1027 | block と pass の和が 31195 |
 | 本番の process | `ps -o rss,pcpu` | proxy は RSS 23312 KiB、%CPU 0.1（起動から 3日23時間の平均）。block は RSS 10088 KiB | ─ |
-| 本番の list の行数 | `grep -vcE '^\s*(#\|$)'` | blocklist 47691、malware-domains 2606、malware-ips 2556、allowlist 374、mitm-list 2 | ─ |
-| feed の最後の取得 | `pd-malware-feed.log` の末尾と `malware-domains.txt` の先頭 | 2026-10-21T15:18:56Z に 3 feed とも取れた（認証の key を送っていない） | ─ |
+| 本番の list の行数 | `grep -vcE '^\s*(#\|$)'` | blocklist 47691、malware-domains 3101、malware-ips 2624、allowlist 374、mitm-list 2 | ─ |
+| feed の最後の取得 | `pd-malware-feed.log` の末尾と `malware-domains.txt` の先頭 | 2026-10-22T06:05:49Z に ThreatFox（有効な候補 5259 行）、URLhaus（476 行）、Feodo を key つきの新しい取得口から取り、`malware-domains.txt` が 3101 行、`malware-ips.txt` が 2624 行（`rc=0`） | ─ |
 | `Cargo.lock` の package | `grep -c '^name = ' Cargo.lock` | 88 | ─ |
 | 受入 ID | `rg -o 'PK-[0-9]+'` | 最大は PK-122。PK-13x 以上は 0 件（rc=1） | PK-122 が 8 件 |
 | Suricata の版 | `suricata -V` | 8.0.3。配布元の最新は 8.0.7 | ─ |
@@ -1744,8 +1745,9 @@ source の系ごとに、昇格の根拠を足す。
 取得は既存の timer の1日1回のまま増やさない。
 SSLBL と Feodo は CC0 で、出力の扱いに制限が無い。URLhaus と ThreatFox の条件は「段階10 の残る穴」に書く。
 
-**認証の key。**abuse.ch は data の利用を認証した利用者に限る。script は `--auth <file>` を受け、file が在れば curl に `-K <file>` で渡す（file は curl の設定の形で key の header を持ち、権限は `0600`。key を argv にも log にも載せない）。
-file が無いとき、または権限が `0600` より緩いときは、ThreatFox と URLhaus へ request を 1 件も出さず、`[warn]` を出して前の list を残す（abuse.ch の条件 2.1 は認証した利用者だけに access を与える。list が古くなる方を採る）。
+**認証の key。**abuse.ch は data の利用を認証した利用者に限り、key は download の path に入る。script は `--auth <file>` を受ける。file は 1 行 `header = "Auth-Key: <key>"` を持ち、key は 40〜64 桁の 16 進、権限は `0600` である。script は key を shell 変数へ読み、URL を `url = "..."` の 1 行として curl の stdin（`-K -`）へ渡す。key は argv にも一時 file にも log にも載らず、失敗の message も URL を出さない。
+file が無いとき、権限が `0600` より緩いとき、読めないとき（mode `0200` など。`[warn]` を出して鍵なしとして続け、鍵の要らない feed は取り続ける）、key の形に合わないときは、ThreatFox と URLhaus へ request を 1 件も出さず、`[warn]` を出して前の list を残す（abuse.ch の条件 2.1 は認証した利用者だけに access を与える。list が古くなる方を採る）。
+取得した本文の候補のうち、domain として正しい物か公開の IPv4 になる物が 1 件も無い feed（200 で返る error page、列の変更）は、取れなかった feed と同じに数える（`[warn]`、rc=1）。取れた feed は `[info] ThreatFox: fetched, <N> candidate rows` のように候補の行数を log に 1 行出す（URL も key も出さない）。下限が前の list を守る。1 run に各 feed 1 request で、1 日 1 回の timer から増やさない（abuse.ch の条件 7.3 の大量の自動取得に当たらない量）。
 Feodo Tracker、SSL Blacklist、OneCRL は key 無しで取り、key を送らない。`--from` は network に出ないので、key の検査の対象外である。
 本番の置き場は `~/pd/abuse-ch.curl` で、key の発行は利用者自身の認証の手続き（auth.abuse.ch）が要る。
 出力は既存の2 file と同じ `~/pd/` に置く。script は OneCRL の record のうち subject か issuer に `eMudhra` か `emSign` を含む物の数を `onecrl emudhra=<n>` の 1 行で log に出す（告知の中間 CA 8 枚が OneCRL に載ったかを数で見るため）。
@@ -1888,7 +1890,7 @@ command は Linux を前提に書く。`LOGDIR` と `<log>` は「受入 ID」�
 | **PK-141** | `defense-report --watch` が、log の実際の日付が 7 に届かない source（`--days` の値では満たせない）、`"allowlisted":true` の当たりを持つ source、1 日の host の数が閾値以上の source、`root=yes` の行に `promote=no` を出し、残りに `promote=yes` を出す | `cargo test --release --lib -- promotion_is_refused_when_an_allowlisted_host_was_hit`。本番は `packetdeath defense-report --watch ~/pd/log/watch.jsonl --allowlist ~/pd/allowlist.txt --days 7` | test は `ok`。本番は source ごとに 1 行 | fixture で 3 条件を満たす source が `promote=yes` | allowlist の host が 1 件 混じると `promote=no` |
 | **PK-142** | 本番の proxy に段階10 を反映した後、(a) PC と この host の通信が今と同じ、(b) 不信の当たりが本番の `flows.jsonl` に `"reason":"chain"` で出る、(c) `defense-off` の 1 操作で戻る | (a) proxy の drop-in に「実装の順番」の引数を足して restart する前と後で `curl -sS -o /dev/null -m 8 -w '%{http_code}\n' https://api.anthropic.com/; curl -sS -o /dev/null -m 8 -w '%{http_code}\n' http://example.com/; getent hosts github.com \| wc -l; curl -sS -o /dev/null -w '%{http_code}\n' -x http://192.0.2.20:8081 https://example.com/`。(b) `H=example.org; FP=$(openssl s_client -connect $H:443 -servername $H </dev/null 2>/dev/null \| openssl x509 -noout -fingerprint -sha1 \| cut -d= -f2 \| tr -d : \| tr A-F a-f); printf 'cert-sha1 %s\n' "$FP" > ~/pd/distrust-canary.txt; sleep 1; curl -sS -o /dev/null -w '%{http_code}\n' -x http://192.0.2.20:8081 https://$H/; sleep 7; curl -sS --max-time 5 -o /dev/null -w '%{http_code}\n' -x http://192.0.2.20:8081 https://$H/; echo "exit=$?"; grep -a "\"sni\":\"$H\"" ~/pd/log/flows.jsonl \| tail -1`。(c) `touch ~/pd/defense-off; sleep 1;` 同じ curl と `tail -1 ~/pd/log/watch.jsonl`、続けて `rm ~/pd/defense-off; : > ~/pd/distrust-canary.txt`。最後に `journalctl -u packetdeath-proxy --since -10min \| grep -c 'onecrl\|distrust'` と `grep -c 'onecrl emudhra=' ~/pd/log/pd-malware-feed.log` | (a) 前後で同じ値（`404`、`200`、1 以上、`200`）。(b) 1 回目 `200`（反応型）、2 回目 `000` と `exit=28`（既定の `blackhole`）、`flows.jsonl` の末尾が `"decision":"block"` と `"reason":"chain"`。proxy は鎖を 24 時間 host ごとに表へ持つので、これは `$H` の鎖が表に無いときの形である（proxy の restart の直後、または 24 時間 その host へ繋いでいないとき）。表に在る host は、canary を書いた直後の 1 回目から `000` になり、`flows.jsonl` の末尾が `"reason":"chain"` になる。どちらの形かは `grep -a "\"sni\":\"$H\"" ~/pd/log/flows.jsonl` で、24 時間 以内の `pass` の行が在るかで分かる。(c) `200`、`watch.jsonl` の末尾が `"mode":"off"`。読み込みの `[info]` が 1 以上、`onecrl emudhra=` の行が 1 以上（数を記録し、告知の 8 枚と比べる） | canary に example.org の leaf の SHA1 を書く | canary が空のときは example.org が `200` のまま |
 
-| **PK-143** | feed script が `--auth <file>` を受け、`0600` の file が在れば ThreatFox と URLhaus の request にだけ curl の `-K` で渡し、key を argv にも log にも載せない。file が無い、または権限が緩ければ、ThreatFox と URLhaus へ request を 1 件も出さず `[warn]` を出す | `curl` を同じ名前の記録用の偽の command に替えた PATH で、`scripts/pd-malware-feed.sh --out <dir> --auth <dir>/auth.curl` を、`auth.curl` が 0600 で在るとき、0644 のとき、無いときの 3 回 打つ。各回で偽の command が記録した request の宛先と引数の file、`rc`、stderr の `[warn]` を見る | 0600：ThreatFox と URLhaus への request が各 1 件で `-K <file>` つき、引数と log に key の文字列が 0。0644：その 2 宛先への request が 0 件、file の mode を名指す `[warn]` が 1。無い：その 2 宛先への request が 0 件、`not requested` の `[warn]` が 2。3 回とも Feodo、SSL Blacklist、OneCRL へは key なしで request する | 0600 の file | 無いときの ThreatFox と URLhaus への request が 0 件 |
+| **PK-143** | feed script が `--auth <file>` を受け、`0600` で形の合う file（`header = "Auth-Key: <40〜64 桁の 16 進>"` の 1 行）が在れば、ThreatFox と URLhaus の request にだけ key を path に入れた URL を curl の stdin（`-K -`）で渡し、key を argv にも log にも載せない。file が無い、権限が緩い、key の形が合わなければ、ThreatFox と URLhaus へ request を 1 件も出さず `[warn]` を出す | `curl` を同じ名前の記録用の偽の command に替えた PATH で、`scripts/pd-malware-feed.sh --out <dir> --auth <dir>/auth.curl` を、`auth.curl` が 0600 で在るとき、0644 のとき、無いとき、形が壊れているとき（桁数 39 と 65、16 進でない、header が 2 行、空）の各回で打つ。偽の command が記録した request の宛先と、`curl` 全部の argv、`rc`、stderr の `[warn]` を見る | 0600：ThreatFox と URLhaus への request が各 1 件で、宛先は `<host>/v2/files/exports/<key>/…`、argv は `-K -` つきで key の文字列が 0（記録した宛先には key が 1 以上で、対照になる）、stdout と stderr にも 0。0644：その 2 宛先への request が 0 件、file の mode を名指す `[warn]` が 1。無い：その 2 宛先への request が 0 件、`not requested` の `[warn]` が 2。形が壊れている：request が 0 件、`[warn]` が 1 で key を含まない。40 桁と 64 桁は使われ、39 桁と 65 桁は使われない。どの回も Feodo、SSL Blacklist、OneCRL へは key なしで request する | 0600 の file | 無いときの ThreatFox と URLhaus への request が 0 件 |
 | **PK-144** | probe の接続先は flow の `dst_ip` に固定し、名前解決し直さない。private、loopback、link-local、CGNAT、multicast、`0.0.0.0/8` の `dst_ip` は probe しない | `cargo test --release --lib -- the_prober_dials_the_flows_destination_and_skips_private_addresses` | `ok`。偽の resolver が別の IP を返しても、偽の上流が受けた接続の相手は flow の `dst_ip`。`10.0.0.1`、`127.0.0.1`、`169.254.1.1`、`100.64.0.1`、`224.0.0.1`、`0.0.0.0` の flow は probe の queue に入らない | 公開の範囲の `dst_ip`（test では `198.51.100.1` を偽の上流へ向けた経路） | private の `dst_ip` で probe の数が 0 |
 
 PK-131 と PK-132 は本番の process に触らない。PK-142 だけが本番の unit を変え、restart は人が打つ。
@@ -1912,7 +1914,7 @@ PK-131 と PK-132 は本番の process に触らない。PK-142 だけが本番�
 | PK-140 | `stage10_judging_adds_at_most_five_ms_to_connect_p95` | 同上 | option 無しの proxy が基準 |
 | PK-141 | `promotion_is_refused_when_an_allowlisted_host_was_hit` | `src/defense.rs` の unit | 3 条件を満たす source は `promote=yes` |
 | PK-142 | ─（本番の受入。command だけで測る） | ─ | restart の前は `watch.jsonl` が無い |
-| PK-143 | `tests/independent_feed.rs` の 5 本（script の受入。PK-94 と同じく command でも測る） | `tests/independent_feed.rs` | file が無ければ ThreatFox と URLhaus への request が 0 |
+| PK-143 | `tests/independent_feed.rs` の 10 本（script の受入。PK-94 と同じく command でも測る） | `tests/independent_feed.rs` | file が無ければ ThreatFox と URLhaus への request が 0 |
 | PK-144 | `the_prober_dials_the_flows_destination_and_skips_private_addresses` | `src/prober.rs` の unit | private の `dst_ip` は probe しない |
 
 新しい module は `src/distrust.rs`（list の読み込みと鎖の照合）、`src/prober.rs`（probe の thread と `ChainVerdicts`）、`src/defense.rs`（見張りの判定、`watch.jsonl`、breaker、`--defense-off`、`defense-report`）の3つで、`src/lib.rs` に `mod` を足す。

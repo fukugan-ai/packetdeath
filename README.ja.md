@@ -1019,7 +1019,7 @@ packetdeath は、その手前で次の順に止めます。
 ### 取り込みの規約
 
 OneCRL、Feodo Tracker、SSL Blacklist は、鍵なしで取れます。
-ThreatFox と URLhaus は、abuse.ch の認証を受けた利用者だけが使えるので、`--auth <鍵の file>` の file が無いか、権限が `0600` より緩いときは、request を 1 件も出しません。
+ThreatFox と URLhaus は、abuse.ch の認証を受けた利用者だけが使えるので、`--auth <鍵の file>` の file が無いか、権限が `0600` より緩いか、鍵が 40〜64 桁の 16 進でないときは、request を 1 件も出しません。
 その間、`malware-domains.txt` と `malware-ips.txt` は前の内容のまま古くなり、script は `rc=1` で終わります。
 鍵の発行には、利用者自身が abuse.ch で認証を受ける手続きが要ります。
 
@@ -1049,8 +1049,10 @@ packetdeath 自身は、この script も一覧の取得も起動しません。
 | OneCRL(Mozilla の失効した証明書の一覧) | 要らない | 配布元の条件に従う |
 
 ThreatFox と URLhaus は、abuse.ch の認証の鍵が要ります。
-鍵は、curl の設定の形で書いた file に入れ、権限を `0600` にして、`--auth` で渡します。
-鍵の file が無いか、権限が緩いときは、この2つへ request を1件も出しません。
+鍵は、`header = "Auth-Key: <あなたの鍵>"` の 1 行だけを書いた file に入れ、権限を `0600` にして、`--auth` で渡します。
+abuse.ch は鍵を取得先の URL の途中に入れる作りです。
+script はその URL を curl の標準入力で渡すので、鍵は `ps` にも log にも出ません。
+鍵の file が無いか、権限が緩いか、鍵の形が合わないときは、この2つへ request を1件も出しません。
 その場合は `[warn]` を出し、前回の一覧をそのまま残します。
 一覧が古くなる方を選んでいます。
 

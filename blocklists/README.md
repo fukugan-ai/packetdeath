@@ -80,7 +80,7 @@ feed の license と利用条件は配布元のものなので、各 feed の fi
 
 ### 手順
 
-1. 取る：`scripts/pd-malware-feed.sh --out ~/pd`。毎日の取得は `scripts/systemd/pd-malware-feed.timer` が行う。install の command は `.service` の冒頭にあり、install は人が打つ。
+1. 取る：`scripts/pd-malware-feed.sh --out ~/pd --auth ~/pd/abuse-ch.curl`（`--auth` を付けないと ThreatFox と URLhaus は取らない）。毎日の取得は `scripts/systemd/pd-malware-feed.timer` が行う。install の command は `.service` の冒頭にあり、install は人が打つ。
 2. 行数を見る：`wc -l ~/pd/malware-domains.txt ~/pd/malware-ips.txt`。script は、行数が下限（domain 1000、IP 100）に届かなければ前の file を残して rc=1 で終わる。rc が 1 のときは `~/pd/log/pd-malware-feed.log` を読み、どの feed が取れなかったかを確かめる。
 3. proxy の引数に足す：`packetdeath proxy ... --blocklist ~/pd/blocklist.txt --blocklist ~/pd/malware-domains.txt --iplist ~/pd/malware-ips.txt`。自分の blocklist と feed の blocklist は別 file のまま、`--blocklist` を2回 渡して和集合にする。
 4. 再起動する：引数を足した最初の1回だけ要る。以後は、list が書き換わると 300 ms 以内に自動で読み直すので、再起動は要らない。
@@ -89,7 +89,7 @@ feed の license と利用条件は配布元のものなので、各 feed の fi
 
 ### 知っておくこと
 
-- ThreatFox と URLhaus は abuse.ch の認証した利用者にだけ提供される。key を `~/pd/abuse-ch.curl`（curl の設定の形。権限 `0600`）に置くまで、script はこの 2 つへ request を出さず、`malware-domains.txt` と `malware-ips.txt` は前の内容のまま古くなり、毎日 rc=1 で終わる。Feodo Tracker、SSL Blacklist、OneCRL は key なしで取る。
+- ThreatFox と URLhaus は abuse.ch の認証した利用者にだけ提供される。key を `~/pd/abuse-ch.curl`（`header = "Auth-Key: <40〜64 桁の 16 進>"` の 1 行。権限 `0600`）に置くまで、script はこの 2 つへ request を出さず、`malware-domains.txt` と `malware-ips.txt` は前の内容のまま古くなり、毎日 rc=1 で終わる。Feodo Tracker、SSL Blacklist、OneCRL は key なしで取る。
 - feed が1つ取れなかった日は、取れた feed だけで list を書き換える（行数が下限以上のとき）。rc=1 の日が続くときは、その feed が止まったか、配布元が認証を求めるようになった可能性がある。
 - ThreatFox の `url` の行は取り込まない。URL の host が無料の file 置き場や正規の site のことがあり、host ごと落とすと誤遮断になる。
 - private、loopback、link-local、CGNAT、multicast の IP は list に入らない。feed が汚染されても、LAN と proxy 自身は落ちない。
