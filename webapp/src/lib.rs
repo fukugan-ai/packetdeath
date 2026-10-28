@@ -8,4 +8,5 @@ pub mod session;
 pub mod setting;
 pub mod settings;
 pub mod status;
+pub mod totp;
 pub mod users;

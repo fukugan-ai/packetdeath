@@ -24,6 +24,27 @@ const WORDS: &[(&str, &str, &str)] = &[
     ("err_409", "すでに存在するか、最後の管理者に対する操作です", "It exists already, or it concerns the last administrator"),
     ("err_422", "入力を受け付けられません", "The input was not accepted"),
     ("err_429", "失敗が続いたため、しばらく待ってください", "Too many failures; wait a while"),
+    ("password_again", "新しいパスワード（もう一度）", "New password (again)"),
+    ("err_mismatch", "2 つのパスワードが一致しません", "The two passwords do not match"),
+    ("err_second","確認コードが違います", "The code is wrong"),
+    ("err_ticket", "サインインの途中で時間が切れました。パスワードからやり直してください", "The sign-in timed out; start again from the password"),
+    ("err_mfa_required", "第二要素を有効にするまで変更できません", "Turn on a second factor before changing anything"),
+    ("second_title", "確認コード", "Verification code"),
+    ("second_hint", "認証アプリの 6 桁のコード、または回復コード", "The 6-digit code from your authenticator app, or a recovery code"),
+    ("second_back", "パスワードに戻る", "Back to the password"),
+    ("second_submit", "確認する", "Verify"),
+    ("tab_security", "セキュリティ", "Security"),
+    ("security", "第二要素", "Second factor"),
+    ("mfa_on", "第二要素は有効です", "The second factor is on"),
+    ("mfa_off", "第二要素はまだ有効ではありません。パスワードだけでは、運用者と管理者は設定を変えられません", "The second factor is not on yet. With a password alone, operators and administrators cannot change settings"),
+    ("mfa_begin", "認証アプリで始める", "Set up an authenticator app"),
+    ("mfa_secret", "認証アプリに、この秘密の文字列を入力します（または下のリンクを開きます）", "Enter this secret in your authenticator app (or open the link below)"),
+    ("mfa_open_app", "認証アプリで開く", "Open in the authenticator app"),
+    ("mfa_code", "アプリに表示された 6 桁のコード", "The 6-digit code the app shows"),
+    ("mfa_confirm", "有効にする", "Turn on"),
+    ("mfa_codes", "回復コードです。もう表示されません。パスワード管理アプリなどに控えてください。1 つにつき 1 回だけ使えます", "Recovery codes. They are not shown again. Keep them in a password manager. Each works once"),
+    ("mfa_saved", "控えました", "I have saved them"),
+    ("mfa_banner", "第二要素を有効にするまで、設定の変更と利用者の管理はできません。「セキュリティ」から有効にしてください", "Until a second factor is on you cannot change settings or manage users. Turn it on under Security"),
     ("err_network", "サーバーに届きません", "The server cannot be reached"),
     ("err_error", "失敗しました", "It failed"),
     ("tab_status", "状態", "Status"),
@@ -93,7 +114,13 @@ pub fn error_word(lang: &str, status: u16) -> String {
 
 /// The line a screen shows for a failed call: the word, the code that names the place it came from, and the server's sentence.
 pub fn error_line(lang: &str, failed: &ApiError) -> String {
-    format!("{} [{}] {}", error_word(lang, failed.status), failed.code, failed.message)
+    let word = match failed.code.as_str() {
+        "PD_AUTH_SECOND" => t(lang, "err_second"),
+        "PD_AUTH_TICKET" => t(lang, "err_ticket"),
+        "PD_AUTH_MFA_REQUIRED" => t(lang, "err_mfa_required"),
+        _ => error_word(lang, failed.status),
+    };
+    format!("{word} [{}] {}", failed.code, failed.message)
 }
 
 #[cfg(test)]
@@ -104,6 +131,12 @@ mod tests {
     fn an_error_line_carries_the_code_and_the_servers_sentence() {
         let failed = ApiError { status: 422, code: String::from("PD_USER_PASSWORD"), message: String::from("the password must be 12 to 256 characters"), lines: Vec::new() };
         assert_eq!(error_line("en", &failed), "The input was not accepted [PD_USER_PASSWORD] the password must be 12 to 256 characters");
+    }
+
+    #[test]
+    fn a_second_step_refusal_does_not_blame_the_password() {
+        let failed = ApiError { status: 401, code: String::from("PD_AUTH_SECOND"), message: String::from("the code is wrong"), lines: Vec::new() };
+        assert_eq!(error_line("en", &failed), "The code is wrong [PD_AUTH_SECOND] the code is wrong");
     }
 
     #[test]

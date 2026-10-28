@@ -7,6 +7,7 @@ use wasm_bindgen_futures::spawn_local;
 use crate::editor::Editor;
 use crate::i18n::{t, word};
 use crate::mark::Mark;
+use crate::security::Security;
 use crate::status::Status;
 use crate::theme;
 use crate::users::Users;
@@ -37,7 +38,12 @@ pub fn ThemeSwitch(lang: Signal<String>, dark: Signal<bool>) -> Element {
     }
 }
 
-const TABS: [&str; 6] = ["status", "ips", "ids", "waf", "av", "users"];
+const TABS: [&str; 7] = ["status", "ips", "ids", "waf", "av", "users", "security"];
+
+/// Whether a signed-in user is told that changes wait for a second factor.
+fn needs_second_factor(role: &str, mfa: bool) -> bool {
+    !mfa && role != "viewer"
+}
 
 fn tab_visible(tab: &str, role: &str) -> bool {
     tab != "users" || role == "admin"
@@ -93,10 +99,14 @@ pub fn Shell(user: Me, lang: Signal<String>, dark: Signal<bool>, me: Signal<Opti
                     button { class: "quiet", r#type: "button", onclick: sign_out, "{t(&l, \"sign_out\")}" }
                 }
             }
+            if needs_second_factor(&user.role, user.mfa) {
+                p { class: "notice notice-danger", id: "mfa-banner", role: "status", "{t(&l, \"mfa_banner\")}" }
+            }
             main { class: "screen",
                 match tab() {
                     "status" => rsx! { Status { lang, me } },
                     "users" => rsx! { Users { lang, user: user.clone(), me } },
+                    "security" => rsx! { Security { lang, user: user.clone(), me } },
                     part => rsx! { Editor { key: "{part}", part: part.to_owned(), lang, user: user.clone(), me } },
                 }
             }
@@ -113,6 +123,14 @@ mod tests {
         assert!(tab_visible("users", "admin"));
         assert!(!tab_visible("users", "operator"));
         assert!(!tab_visible("users", "viewer"));
-        assert!(TABS.iter().filter(|name| tab_visible(name, "viewer")).count() == 5);
+        assert!(TABS.iter().filter(|name| tab_visible(name, "viewer")).count() == 6);
+    }
+
+    #[test]
+    fn only_a_role_that_changes_things_is_told_to_turn_on_the_factor() {
+        assert!(needs_second_factor("admin", false));
+        assert!(needs_second_factor("operator", false));
+        assert!(!needs_second_factor("viewer", false));
+        assert!(!needs_second_factor("admin", true));
     }
 }

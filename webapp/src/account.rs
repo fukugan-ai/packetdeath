@@ -12,8 +12,9 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::app::{cookie_id, lock, reader, who, writer, Fail, Reply, Shared, Source, COOKIE_NAME};
+use crate::app::{cookie_id, enroller, lock, reader, who, writer, Fail, Reply, Shared, Source, COOKIE_NAME};
 use crate::session::LIFETIME;
+use crate::totp;
 use crate::users::{Role, UserError};
 
 #[derive(Deserialize)]
@@ -34,6 +35,8 @@ pub struct Change {
     pub role: Option<Role>,
     pub disabled: Option<bool>,
     pub password: Option<String>,
+    /// Remove the second factor (the user lost the device and the recovery codes).
+    pub mfa_reset: Option<bool>,
 }
 
 fn fail(status: StatusCode, code: &'static str, text: &str) -> Fail {
@@ -47,6 +50,9 @@ fn user_fail(error: UserError) -> Fail {
         UserError::Exists => (StatusCode::CONFLICT, "PD_USER_EXISTS"),
         UserError::LastAdmin => (StatusCode::CONFLICT, "PD_USER_LAST_ADMIN"),
         UserError::NotFound => (StatusCode::NOT_FOUND, "PD_USER_NOT_FOUND"),
+        UserError::MfaOn => (StatusCode::CONFLICT, "PD_MFA_ON"),
+        UserError::MfaNone => (StatusCode::CONFLICT, "PD_MFA_NONE"),
+        UserError::BadCode => (StatusCode::UNPROCESSABLE_ENTITY, "PD_MFA_CODE"),
         UserError::Store(_) => (StatusCode::INTERNAL_SERVER_ERROR, "PD_USER_STORE"),
     };
     Fail(status, code, error.to_string())
@@ -69,7 +75,8 @@ fn signed_in(state: &Shared, name: &str, role: Role) -> Reply {
     let started = lock(&state.sessions).start(name, role, state.now());
     let (id, csrf) = started.map_err(|why| Fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_AUTH_SESSION_START", why))?;
     let cookie = cookie_value(state, &id, LIFETIME)?;
-    let body = Json(json!({"name": name, "role": role, "csrf": csrf}));
+    let mfa = lock(&state.users).mfa_on(name);
+    let body = Json(json!({"name": name, "role": role, "csrf": csrf, "mfa": mfa}));
     let mut res = body.into_response();
     res.headers_mut().insert(SET_COOKIE, cookie);
     Ok(res)
@@ -80,7 +87,8 @@ pub async fn bootstrap(State(state): State<Shared>, headers: HeaderMap) -> Reply
     let empty = lock(&state.users).is_empty();
     let mut me = json!(null);
     if let Ok(found) = who(&state, &headers) {
-        me = json!({"name": found.name, "role": found.role, "csrf": found.csrf});
+        let mfa = lock(&state.users).mfa_on(&found.name);
+        me = json!({"name": found.name, "role": found.role, "csrf": found.csrf, "mfa": mfa});
     }
     Ok(Json(json!({"needs_register": empty, "me": me})).into_response())
 }
@@ -114,13 +122,73 @@ pub async fn login(State(state): State<Shared>, Extension(source): Extension<Sou
         note(&state, &body.name, "login", &body.name, false);
         return Err(fail(StatusCode::UNAUTHORIZED, "PD_AUTH_LOGIN", "the account or the password is wrong"));
     };
+    if lock(&state.users).mfa_on(&body.name) {
+        let issued = lock(&state.tickets).issue(&body.name, role, now);
+        let ticket = issued.map_err(|why| Fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_AUTH_SESSION_START", why))?;
+        note(&state, &body.name, "login-password", &body.name, true);
+        return Ok(Json(json!({"mfa": true, "ticket": ticket})).into_response());
+    }
     lock(&state.limiter).succeeded(&body.name);
     note(&state, &body.name, "login", &body.name, true);
     signed_in(&state, &body.name, role)
 }
 
+#[derive(Deserialize)]
+pub struct Second {
+    pub ticket: String,
+    pub code: String,
+}
+
+/// The second step: a ticket from a right password, and a TOTP code or a recovery code.
+pub async fn login_second(State(state): State<Shared>, Extension(source): Extension<Source>, Json(body): Json<Second>) -> Reply {
+    let now = state.now();
+    let owner = lock(&state.tickets).owner(&body.ticket, now);
+    let Some((name, role)) = owner else {
+        return Err(fail(StatusCode::UNAUTHORIZED, "PD_AUTH_TICKET", "the sign-in took too long or was used up; enter the password again"));
+    };
+    if lock(&state.limiter).must_wait(&name, &source.0, now) {
+        return Err(too_many());
+    }
+    let accepted = lock(&state.users).second_factor(&name, &body.code, now).map_err(user_fail)?;
+    if !accepted {
+        lock(&state.tickets).missed(&body.ticket);
+        lock(&state.limiter).failed(&name, &source.0, now);
+        note(&state, &name, "login-second", &name, false);
+        return Err(fail(StatusCode::UNAUTHORIZED, "PD_AUTH_SECOND", "the code is wrong"));
+    }
+    lock(&state.tickets).spend(&body.ticket);
+    lock(&state.limiter).succeeded(&name);
+    note(&state, &name, "login", &name, true);
+    signed_in(&state, &name, role)
+}
+
+#[derive(Deserialize)]
+pub struct Code {
+    pub code: String,
+}
+
+/// A new pending secret for the signed-in user, as text and as an `otpauth://` address.
+pub async fn totp_begin(State(state): State<Shared>, headers: HeaderMap) -> Reply {
+    let me = enroller(&state, &headers, Role::Viewer)?;
+    let begun = lock(&state.users).totp_begin(&me.name);
+    note(&state, &me.name, "mfa-begin", &me.name, begun.is_ok());
+    let secret = begun.map_err(user_fail)?;
+    let bytes = totp::secret_from_text(&secret).map_err(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_MFA_STORE", "the secret could not be read back"))?;
+    Ok(Json(json!({"secret": secret, "uri": totp::uri(&me.name, "packetdeath", &bytes)})).into_response())
+}
+
+/// Turn the pending secret on with a code from it; the recovery codes come back once.
+pub async fn totp_confirm(State(state): State<Shared>, headers: HeaderMap, Json(body): Json<Code>) -> Reply {
+    let me = enroller(&state, &headers, Role::Viewer)?;
+    let now = state.now();
+    let confirmed = lock(&state.users).totp_confirm(&me.name, &body.code, now);
+    note(&state, &me.name, "mfa-confirm", &me.name, confirmed.is_ok());
+    let recovery = confirmed.map_err(user_fail)?;
+    Ok(Json(json!({"recovery": recovery})).into_response())
+}
+
 pub async fn logout(State(state): State<Shared>, headers: HeaderMap) -> Reply {
-    let me = writer(&state, &headers, Role::Viewer)?;
+    let me = enroller(&state, &headers, Role::Viewer)?;
     if let Some(id) = cookie_id(&headers) {
         lock(&state.sessions).end(&id);
     }
@@ -158,6 +226,10 @@ fn apply(state: &Shared, name: &str, body: &Change) -> Result<(), UserError> {
     }
     if let Some(password) = &body.password {
         users.set_password(name, password)?;
+        lock(&state.sessions).end_all_of(name);
+    }
+    if body.mfa_reset == Some(true) {
+        users.mfa_reset(name)?;
         lock(&state.sessions).end_all_of(name);
     }
     Ok(())

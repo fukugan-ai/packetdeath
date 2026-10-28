@@ -40,6 +40,7 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
     let mut error = use_signal(String::new);
     let mut new_name = use_signal(String::new);
     let mut new_password = use_signal(String::new);
+    let mut new_confirm = use_signal(String::new);
     let mut new_role = use_signal(|| String::from("viewer"));
     let csrf = user.csrf.clone();
 
@@ -70,6 +71,11 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
     let l = lang();
     let create = move |event: FormEvent| {
         event.prevent_default();
+        if new_password() != new_confirm() {
+            error.set(t(&lang(), "err_mismatch"));
+            return;
+        }
+        new_confirm.set(String::new());
         let body = json!({"name": new_name(), "password": new_password(), "role": new_role()});
         act.call(("POST", String::from("/api/users"), body));
         new_password.set(String::new());
@@ -91,6 +97,8 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
                     oninput: move |event| new_name.set(event.value()) }
                 input { r#type: "password", id: "new-user-password", name: "new-password", value: "{new_password}", placeholder: "{t(&l, \"password_new\")}", minlength: "12", required: true, autocomplete: "new-password",
                     oninput: move |event| new_password.set(event.value()) }
+                input { r#type: "password", id: "new-user-password-confirm", name: "new-password-confirm", value: "{new_confirm}", placeholder: "{t(&l, \"password_again\")}", minlength: "12", required: true, autocomplete: "new-password",
+                    oninput: move |event| new_confirm.set(event.value()) }
                 select { value: "{new_role}", onchange: move |event| new_role.set(event.value()),
                     for role in ROLES { option { key: "{role}", value: "{role}", "{word(&l, \"role\", role)}" } }
                 }

@@ -103,6 +103,71 @@ impl Sessions {
     }
 }
 
+/// A ticket for the second step lives this long.
+pub const TICKET_LIFETIME: u64 = 300;
+/// Wrong second-step answers a ticket takes before it is dropped.
+pub const TICKET_FAILS: u32 = 5;
+/// Tickets held at once.
+pub const MAX_TICKETS: usize = 256;
+
+struct Ticket {
+    name: String,
+    role: Role,
+    born: u64,
+    fails: u32,
+}
+
+/// Passwords that were right and wait for a second factor: ticket id to account. Memory only.
+#[derive(Default)]
+pub struct Tickets {
+    waiting: HashMap<String, Ticket>,
+}
+
+impl Tickets {
+    /// A new ticket for `name`. When the table is full the oldest makes room.
+    pub fn issue(&mut self, name: &str, role: Role, now: u64) -> Result<String, String> {
+        self.waiting.retain(|_, t| now.saturating_sub(t.born) < TICKET_LIFETIME);
+        while self.waiting.len() >= MAX_TICKETS {
+            let oldest = self.waiting.iter().min_by_key(|(_, t)| t.born).map(|(id, _)| id.clone());
+            let Some(id) = oldest else { break };
+            self.waiting.remove(&id);
+        }
+        let id = token()?;
+        self.waiting.insert(id.clone(), Ticket { name: name.to_owned(), role, born: now, fails: 0 });
+        Ok(id)
+    }
+
+    /// The account a live ticket belongs to, with its role.
+    pub fn owner(&self, id: &str, now: u64) -> Option<(String, Role)> {
+        let t = self.waiting.get(id)?;
+        (now.saturating_sub(t.born) < TICKET_LIFETIME).then(|| (t.name.clone(), t.role))
+    }
+
+    /// A wrong answer: the ticket is dropped at the fifth.
+    pub fn missed(&mut self, id: &str) {
+        let spent = self.waiting.get_mut(id).is_some_and(|t| {
+            t.fails += 1;
+            t.fails >= TICKET_FAILS
+        });
+        if spent {
+            self.waiting.remove(id);
+        }
+    }
+
+    /// The ticket is used up.
+    pub fn spend(&mut self, id: &str) {
+        self.waiting.remove(id);
+    }
+
+    pub fn len(&self) -> usize {
+        self.waiting.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.waiting.is_empty()
+    }
+}
+
 fn alive(entry: &Entry, now: u64) -> bool {
     now.saturating_sub(entry.started) < LIFETIME && now.saturating_sub(entry.last) < IDLE
 }

@@ -19,7 +19,7 @@ use axum::{Json, Router};
 use serde_json::json;
 
 use crate::audit::Audit;
-use crate::session::{Limiter, Sessions, Who};
+use crate::session::{Limiter, Sessions, Tickets, Who};
 use crate::settings::Store;
 use crate::users::{Role, Users};
 
@@ -30,6 +30,7 @@ pub const COOKIE_NAME: &str = "pd_session";
 pub struct AppState {
     pub users: Mutex<Users>,
     pub sessions: Mutex<Sessions>,
+    pub tickets: Mutex<Tickets>,
     pub limiter: Mutex<Limiter>,
     pub settings: Store,
     pub audit: Audit,
@@ -39,6 +40,8 @@ pub struct AppState {
     pub clock: Box<dyn Fn() -> u64 + Send + Sync>,
     /// Add `Secure` to the cookie (the console sits behind TLS).
     pub secure: bool,
+    /// An operator or an administrator changes nothing until a second factor is on.
+    pub require_mfa: bool,
 }
 
 pub type Shared = Arc<AppState>;
@@ -110,12 +113,21 @@ pub fn reader(state: &AppState, headers: &HeaderMap, min: Role) -> Result<Who, F
     Ok(me)
 }
 
-/// A change: a session, at least `min`, and the CSRF token of that session.
-pub fn writer(state: &AppState, headers: &HeaderMap, min: Role) -> Result<Who, Fail> {
+/// A change that sets up the second factor itself: a session, at least `min`, and the CSRF token of that session.
+pub fn enroller(state: &AppState, headers: &HeaderMap, min: Role) -> Result<Who, Fail> {
     let me = reader(state, headers, min)?;
     let sent = headers.get("x-csrf-token").and_then(|v| std::str::from_utf8(v.as_bytes()).ok());
     if !sent.is_some_and(|token| same(token, &me.csrf)) {
         return Err(fail(StatusCode::FORBIDDEN, "PD_AUTH_CSRF", "the CSRF token is missing or wrong"));
+    }
+    Ok(me)
+}
+
+/// A change: as `enroller`, and an operator or an administrator must have a second factor on.
+pub fn writer(state: &AppState, headers: &HeaderMap, min: Role) -> Result<Who, Fail> {
+    let me = enroller(state, headers, min)?;
+    if state.require_mfa && me.role >= Role::Operator && !lock(&state.users).mfa_on(&me.name) {
+        return Err(fail(StatusCode::FORBIDDEN, "PD_AUTH_MFA_REQUIRED", "turn on a second factor first"));
     }
     Ok(me)
 }
@@ -152,7 +164,10 @@ pub fn router(state: Shared) -> Router {
         .route("/api/bootstrap", get(account::bootstrap))
         .route("/api/register", post(account::register))
         .route("/api/login", post(account::login))
+        .route("/api/login/second", post(account::login_second))
         .route("/api/logout", post(account::logout))
+        .route("/api/mfa/totp/begin", post(account::totp_begin))
+        .route("/api/mfa/totp/confirm", post(account::totp_confirm))
         .route("/api/users", get(account::list).post(account::create))
         .route("/api/users/{name}", patch(account::change).delete(account::remove))
         .route("/api/settings", get(setting::catalog))
@@ -172,6 +187,8 @@ pub struct Config {
     pub logs: PathBuf,
     pub static_dir: Option<PathBuf>,
     pub secure: bool,
+    /// `--second-factor-optional`: operators and administrators may change settings without a second factor.
+    pub mfa_optional: bool,
 }
 
 fn need(found: Option<PathBuf>, flag: &str) -> Result<PathBuf, String> {
@@ -182,11 +199,12 @@ fn need(found: Option<PathBuf>, flag: &str) -> Result<PathBuf, String> {
 pub fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut listen = SocketAddr::from(([127, 0, 0, 1], 8088));
     let (mut data, mut config, mut logs, mut static_dir) = (None, None, None, None);
-    let (mut secure, mut remote) = (false, false);
+    let (mut secure, mut remote, mut mfa_optional) = (false, false, false);
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--secure" => secure = true,
+            "--second-factor-optional" => mfa_optional = true,
             "--allow-remote" => remote = true,
             "--listen" | "--data" | "--config" | "--logs" | "--static" => {
                 let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
@@ -204,7 +222,7 @@ pub fn parse_args(args: &[String]) -> Result<Config, String> {
     if !listen.ip().is_loopback() && !remote {
         return Err(String::from("--listen beyond this machine needs --allow-remote"));
     }
-    Ok(Config { listen, data: need(data, "--data")?, config: need(config, "--config")?, logs: need(logs, "--logs")?, static_dir, secure })
+    Ok(Config { listen, data: need(data, "--data")?, config: need(config, "--config")?, logs: need(logs, "--logs")?, static_dir, secure, mfa_optional })
 }
 
 fn wall_clock() -> u64 {
@@ -224,6 +242,7 @@ pub fn build(c: &Config) -> Result<Shared, String> {
     Ok(Arc::new(AppState {
         users: Mutex::new(users),
         sessions: Mutex::new(Sessions::default()),
+        tickets: Mutex::new(Tickets::default()),
         limiter: Mutex::new(Limiter::default()),
         settings,
         audit,
@@ -231,6 +250,7 @@ pub fn build(c: &Config) -> Result<Shared, String> {
         static_dir: c.static_dir.clone(),
         clock: Box::new(wall_clock),
         secure: c.secure,
+        require_mfa: !c.mfa_optional,
     }))
 }
 

@@ -12,6 +12,9 @@ use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::Argon2;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+use crate::totp;
 
 /// Longest and shortest password accepted.
 pub const PASSWORD_MIN: usize = 12;
@@ -31,6 +34,16 @@ pub enum Role {
     Admin,
 }
 
+/// A time-based one-time password secret: pending until a code from it is typed, then active.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Totp {
+    /// base32 text of the secret.
+    secret: String,
+    active: bool,
+    /// The step of the last code taken, so a code is taken once.
+    last_step: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Stored {
     name: String,
@@ -38,16 +51,25 @@ struct Stored {
     hash: String,
     disabled: bool,
     created: u64,
+    #[serde(default)]
+    totp: Option<Totp>,
+    /// SHA-256 (hex) of each unused recovery code.
+    #[serde(default)]
+    recovery: Vec<String>,
 }
 
-/// A user as the screens see it: no hash.
+/// A user as the screens see it: no hash, no secret.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct View {
     pub name: String,
     pub role: Role,
     pub disabled: bool,
     pub created: u64,
+    pub mfa: bool,
 }
+
+/// Recovery codes issued with a new second factor.
+pub const RECOVERY_CODES: usize = 10;
 
 /// Why a change to the directory was refused.
 #[derive(Debug, PartialEq, Eq)]
@@ -57,6 +79,12 @@ pub enum UserError {
     Exists,
     NotFound,
     LastAdmin,
+    /// A second factor is on already.
+    MfaOn,
+    /// No second factor is waiting to be confirmed.
+    MfaNone,
+    /// The code typed is not valid.
+    BadCode,
     Store(String),
 }
 
@@ -68,6 +96,9 @@ impl std::fmt::Display for UserError {
             UserError::Exists => write!(out, "that name is taken"),
             UserError::NotFound => write!(out, "no such user"),
             UserError::LastAdmin => write!(out, "the last active administrator cannot be removed, disabled or demoted"),
+            UserError::MfaOn => write!(out, "a second factor is on already"),
+            UserError::MfaNone => write!(out, "no second factor is waiting to be confirmed"),
+            UserError::BadCode => write!(out, "that code is not valid"),
             UserError::Store(why) => write!(out, "the user file: {why}"),
         }
     }
@@ -91,6 +122,26 @@ fn hash_of(password: &str) -> Result<String, UserError> {
 fn name_ok(name: &str) -> bool {
     (1..=NAME_MAX).contains(&name.len())
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | '+'))
+}
+
+/// The form a recovery code is compared in: upper case, no dashes or spaces.
+fn recovery_digest(typed: &str) -> String {
+    let plain: String = typed.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_uppercase()).collect();
+    Sha256::digest(plain.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// New recovery codes: the text to show (`XXXXX-XXXXX`) and the digests to keep. 48 random bits each.
+fn new_recovery_codes() -> Result<(Vec<String>, Vec<String>), UserError> {
+    let (mut shown, mut kept) = (Vec::new(), Vec::new());
+    for _ in 0..RECOVERY_CODES {
+        let mut bytes = [0_u8; 6];
+        getrandom::fill(&mut bytes).map_err(|e| UserError::Store(e.to_string()))?;
+        let text = totp::secret_text(&bytes);
+        let code = format!("{}-{}", &text[..5], &text[5..]);
+        kept.push(recovery_digest(&code));
+        shown.push(code);
+    }
+    Ok((shown, kept))
 }
 
 fn password_ok(password: &str) -> bool {
@@ -141,7 +192,7 @@ impl Users {
             return Err(UserError::Exists);
         }
         let hash = hash_of(password)?;
-        self.list.push(Stored { name: name.to_owned(), role, hash, disabled: false, created: now });
+        self.list.push(Stored { name: name.to_owned(), role, hash, disabled: false, created: now, totp: None, recovery: Vec::new() });
         self.save()
     }
 
@@ -161,7 +212,7 @@ impl Users {
     }
 
     pub fn list(&self) -> Vec<View> {
-        let view = |u: &Stored| View { name: u.name.clone(), role: u.role, disabled: u.disabled, created: u.created };
+        let view = |u: &Stored| View { name: u.name.clone(), role: u.role, disabled: u.disabled, created: u.created, mfa: u.totp.as_ref().is_some_and(|t| t.active) };
         self.list.iter().map(view).collect()
     }
 
@@ -200,6 +251,72 @@ impl Users {
         }
         let at = self.index(name)?;
         self.list[at].hash = hash_of(password)?;
+        self.save()
+    }
+
+    /// Whether `name` has a second factor on.
+    pub fn mfa_on(&self, name: &str) -> bool {
+        self.list.iter().any(|u| u.name == name && u.totp.as_ref().is_some_and(|t| t.active))
+    }
+
+    /// Start a second factor: a new secret, pending until `totp_confirm`. Returns the base32 text.
+    pub fn totp_begin(&mut self, name: &str) -> Result<String, UserError> {
+        let at = self.index(name)?;
+        if self.list[at].totp.as_ref().is_some_and(|t| t.active) {
+            return Err(UserError::MfaOn);
+        }
+        let secret = totp::new_secret().map_err(|e| UserError::Store(format!("{e:?}")))?;
+        let text = totp::secret_text(&secret);
+        self.list[at].totp = Some(Totp { secret: text.clone(), active: false, last_step: None });
+        self.save()?;
+        Ok(text)
+    }
+
+    /// Turn the pending secret on once a code from it is typed. Returns the recovery codes, to be shown once.
+    pub fn totp_confirm(&mut self, name: &str, typed: &str, now: u64) -> Result<Vec<String>, UserError> {
+        let at = self.index(name)?;
+        let Some(pending) = self.list[at].totp.clone().filter(|t| !t.active) else {
+            return Err(UserError::MfaNone);
+        };
+        let secret = totp::secret_from_text(&pending.secret).map_err(|e| UserError::Store(format!("{e:?}")))?;
+        let verified = totp::verify(&secret, typed, now, None).map_err(|e| UserError::Store(format!("{e:?}")))?;
+        let Some(step) = verified else {
+            return Err(UserError::BadCode);
+        };
+        let (shown, kept) = new_recovery_codes()?;
+        self.list[at].totp = Some(Totp { active: true, last_step: Some(step), ..pending });
+        self.list[at].recovery = kept;
+        self.save()?;
+        Ok(shown)
+    }
+
+    /// A second factor typed at sign-in: the current code, or one unused recovery code (taken once).
+    pub fn second_factor(&mut self, name: &str, typed: &str, now: u64) -> Result<bool, UserError> {
+        let at = self.index(name)?;
+        let Some(active) = self.list[at].totp.clone().filter(|t| t.active) else {
+            return Ok(false);
+        };
+        let secret = totp::secret_from_text(&active.secret).map_err(|e| UserError::Store(format!("{e:?}")))?;
+        let verified = totp::verify(&secret, typed, now, active.last_step).map_err(|e| UserError::Store(format!("{e:?}")))?;
+        if let Some(step) = verified {
+            self.list[at].totp = Some(Totp { last_step: Some(step), ..active });
+            self.save()?;
+            return Ok(true);
+        }
+        let digest = recovery_digest(typed);
+        let Some(used) = self.list[at].recovery.iter().position(|kept| *kept == digest) else {
+            return Ok(false);
+        };
+        self.list[at].recovery.remove(used);
+        self.save()?;
+        Ok(true)
+    }
+
+    /// Remove the second factor and the recovery codes of `name`.
+    pub fn mfa_reset(&mut self, name: &str) -> Result<(), UserError> {
+        let at = self.index(name)?;
+        self.list[at].totp = None;
+        self.list[at].recovery.clear();
         self.save()
     }
 

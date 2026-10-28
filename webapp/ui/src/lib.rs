@@ -15,6 +15,7 @@ pub mod api;
 pub mod editor;
 pub mod i18n;
 pub mod mark;
+pub mod security;
 pub mod shell;
 pub mod signin;
 pub mod status;
@@ -31,6 +32,8 @@ pub struct Me {
     pub name: String,
     pub role: String,
     pub csrf: String,
+    /// A second factor is on.
+    pub mfa: bool,
 }
 
 /// The user in a sign-in or bootstrap answer; `null` or a body without the three fields is nobody.
@@ -39,6 +42,7 @@ pub fn me_of(body: &Value) -> Option<Me> {
         name: body.get("name")?.as_str()?.to_owned(),
         role: body.get("role")?.as_str()?.to_owned(),
         csrf: body.get("csrf")?.as_str()?.to_owned(),
+        mfa: body.get("mfa").and_then(Value::as_bool) == Some(true),
     })
 }
 
@@ -107,6 +111,8 @@ mod tests {
     #[test]
     fn a_full_answer_is_a_user() {
         let found = me_of(&json!({"name": "a", "role": "admin", "csrf": "t"}));
-        assert_eq!(found, Some(Me { name: "a".into(), role: "admin".into(), csrf: "t".into() }));
+        assert_eq!(found, Some(Me { name: "a".into(), role: "admin".into(), csrf: "t".into(), mfa: false }));
+        let with = me_of(&json!({"name": "a", "role": "admin", "csrf": "t", "mfa": true}));
+        assert_eq!(with.map(|m| m.mfa), Some(true));
     }
 }

@@ -105,7 +105,7 @@
 
 画面試験（PK-200、PK-201）の S-01 から S-25 のうち、S-21 が落ちた。最初の管理者を登録した直後にサインアウトすると、サインインではなく登録の形が残った。原因は、利用者がいるかどうかを起動時に 1 回しか決めていなかったことにある。直しは、誰かがサインインしたら「利用者がいる」に切り替えることである。同じ試験で、役の選択欄が現在の役ではなく admin を示す表示のずれも見つかり、現在の役を選ぶ形に直した。S-25 の期待は、手順が自分で起こす 422 と 403 を数えていなかったため、製品の欠陥は 409 の 1 件だけだった。
 
-ブラウザの password 自動入力と強いパスワードの提案が効くよう、サインインと登録の欄、利用者の作成の欄、password の再設定の欄に `id` と `name` と `autocomplete`（登録と新規は `new-password`）を付け、再設定の欄は利用者名を持つ form に入れた。
+ブラウザの password 自動入力と強いパスワードの提案が効くよう、サインインと登録の欄、利用者の作成の欄、password の再設定の欄に `id` と `name` と `autocomplete`（登録と新規は `new-password`）を付け、再設定の欄は利用者名を持つ form に入れた。最初の管理者の登録と利用者の作成は、新しいパスワードの欄と確認の欄の 2 つを `new-password` で並べる（browser は 2 つの password 欄を持つ form を登録の form と判定しやすく、強いパスワードの提案を両方に入れる）。2 つが違えば server に送らない。
 
 運用の手順は `operations.ja.md`、本番の unit は `deploy/packetdeath-webapp.service` にある。
 
@@ -122,6 +122,13 @@ server の拒否は、すべて `{"error": 文, "code": 番号}` で返る。番
 | `PD_AUTH_ROLE` | 403 | 役が足りない |
 | `PD_AUTH_CSRF` | 403 | CSRF token が無い、または違う |
 | `PD_AUTH_COOKIE`、`PD_AUTH_SESSION_START` | 500 | cookie または session を作れない |
+| `PD_AUTH_TICKET` | 401 | 第二段階の券が無い、期限（5 分）切れ、または 5 回の失敗で失効した |
+| `PD_AUTH_SECOND` | 401 | 第二段階の code（TOTP または回復 code）が違う、または使用済み |
+| `PD_AUTH_MFA_REQUIRED` | 403 | 運用者以上が第二要素を入れる前に変更しようとした（`--second-factor-optional` で外せる） |
+| `PD_MFA_ON` | 409 | 第二要素はすでに有効 |
+| `PD_MFA_NONE` | 409 | 確認待ちの秘密が無い |
+| `PD_MFA_CODE` | 422 | 確認の code が違う |
+| `PD_MFA_STORE` | 500 | 秘密を読み戻せない |
 | `PD_USER_NAME` | 422 | 名前が 1 から 128 文字の英数字と `.` `_` `-` `@` `+` ではない |
 | `PD_USER_PASSWORD` | 422 | password が 12 から 256 文字ではない |
 | `PD_USER_EXISTS` | 409 | その名前は使われている |
@@ -145,7 +152,44 @@ server の拒否は、すべて `{"error": 文, "code": 番号}` で返る。番
 | 外部の認証（OAuth、メール） | 外へ出る連絡手段を持たない。単独の host で閉じる |
 | 画面を JavaScript で書く | 画面は Dioxus（Rust / WASM）にそろえる |
 
+### 段階14 第二要素（設計、未実装）
+
+**最新情報** 取得 2026-10-28。NIST SP 800-63B-4（https://pages.nist.gov/800-63-4/sp800-63b.html）は、AAL2 で「少なくとも 1 つの phishing 耐性のある選択肢を出す」ことを求め、AAL3 では非エクスポートの暗号鍵だけを認める。メールは「out-of-band 認証に使ってはならない」とあり、アドレスの確認コードと回復 code は認証ではない。手で入力する code（OTP、out-of-band）は phishing 耐性とは数えない。
+
+結論は次の 3 点である。
+
+- メールの link は認証の手段にしない。受け取る口が password だけで開く場合があり、傍受と DNS の付け替えも受けるため、password の上に重ねても第二要素にならない。この host には送信路も無く、足せば外へ出る口が増える。
+- 第一の第二要素は WebAuthn（passkey、security key）にする。鍵が origin に結び付くので、中継する偽サイトでは署名が通らない。
+- 第二は TOTP（RFC 6238）、あわせて回復 code を 10 本発行する。TOTP は中継に弱いので、WebAuthn が使えない場合の代替に置く。
+- 管理者は第二要素を登録するまで、設定の変更と利用者の管理ができない。
+
+部品は `src/totp.rs`（RFC 6238 の計算と照合）と `src/webauthn.rs`（登録と署名の検証）で、どちらも画面を持たない土台である。TOTP は HMAC-SHA1 の `hmac` `sha1` と `subtle`、WebAuthn の署名検証は ES256（P-256）だけを `p256` で行う。`webauthn-rs` は採らない。その下の `webauthn-rs-core` が openssl を必須の依存に持つためである。
+
+**別の PC から入る場合。**WebAuthn は secure context（HTTPS、または localhost）でしか動かない（MDN の Web Authentication API は HTTPS を要件としている。localhost の扱いは仕様の側の記述で、今回は読んでいない）。LAN の IP に http で入ると `navigator.credentials` が無く、passkey は出ない。別の PC から使える形は次の 2 つである。
+
+- reverse proxy で終端した HTTPS の名前で入る。起動時に `--rp-id` と `--origin` で 1 つの名前に固定し、passkey はその名前に結び付く。別の名前で入ると使えない。
+- SSH の転送で、その PC の localhost に出す。rp_id は `localhost` になる。
+
+TOTP と回復 code は secure context を要らず、どの PC の http でも動く。物理の security key（USB、NFC）は、上のどちらの入り方でも別の PC へ持ち運べる。
+
+画面は 3 つ増える。人からの見え方は次のとおりである。
+
+- **サインインの第二段階**：password が通ると同じ枠の中で入れ替わる。欄は 1 つで、`autocomplete="one-time-code"`、`inputmode="numeric"`、6 桁。passkey を登録済みなら「passkey で確かめる」ボタンが先に並ぶ。回復 code を入れる小さな折りたたみが下にある。
+- **第二要素の登録**（帯の「セキュリティ」の画面、`ui/src/security.rs`。全員が自分の分を開ける。運用者以上で第二要素が無いと、帯の下に「有効にするまで変更できません」の注意が出る）：TOTP は秘密の文字列と `otpauth://` のリンクを出し、確認コードを 1 回通すと有効になる。QR は描かない（描画の部品を足さず、文字列とリンクで足りる）。passkey は「追加」ボタン 1 つで browser の確認が開く。
+- **回復 code の表示**：10 本を 1 回だけ並べ、「控えました」を押すまで閉じない。再表示はできず、作り直すと古い組は無効になる。
+
+| 受入 ID | 受入 | 測り方 |
+|---|---|---|
+| **PK-210** | TOTP の秘密は、確認コードを 1 回通すまで有効にならない | server の test |
+| **PK-211** | password が合っても、第二要素を通すまで session が作られない | server の test |
+| **PK-212** | 使った TOTP コードの再利用と、±1 窓の外のコードを断る | server の test |
+| **PK-213** | 回復 code は hash で保存され、1 回で消える | server の test |
+| **PK-214** | WebAuthn は rp_id と origin に束縛され、署名回数が戻る応答を断る | server の test |
+| **PK-215** | 第二要素が未登録の管理者は、設定の変更と利用者の管理を断られる | server の test |
+| **PK-216** | 画面：登録、サインインの第二段階、回復 code の表示が browser で動く | 画面試験の席 |
+
 ### 残る穴
 
 - 起動時にだけ読む option は WebApp から変えられない。
+- 第二要素を失った管理者の回復は、host 上の管理者が `users.json` の該当欄を消す手順（`operations.ja.md`）になる。メールで取り戻す道は持たない。
 - TLS は終端を別の物（reverse proxy）に任せる。WebApp 自身は TLS を持たない。

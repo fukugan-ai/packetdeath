@@ -12,7 +12,7 @@ use axum::Router;
 use http_body_util::BodyExt;
 use packetdeath_webapp::app::{router, AppState, Shared};
 use packetdeath_webapp::audit::Audit;
-use packetdeath_webapp::session::{Limiter, Sessions};
+use packetdeath_webapp::session::{Limiter, Sessions, Tickets};
 use packetdeath_webapp::settings::Store;
 use packetdeath_webapp::users::Users;
 use serde_json::Value;
@@ -48,7 +48,17 @@ pub struct Login {
     pub csrf: String,
 }
 
+/// A console that does not insist on a second factor for operators and administrators.
 pub fn rig(name: &str) -> Result<Rig, Fault> {
+    rig_with(name, false)
+}
+
+/// A console that insists on a second factor, as the command line does by default.
+pub fn rig_requiring_mfa(name: &str) -> Result<Rig, Fault> {
+    rig_with(name, true)
+}
+
+fn rig_with(name: &str, require_mfa: bool) -> Result<Rig, Fault> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("it").join(format!("{}-{name}", std::process::id()));
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
@@ -61,6 +71,7 @@ pub fn rig(name: &str) -> Result<Rig, Fault> {
     let state: Shared = Arc::new(AppState {
         users: Mutex::new(Users::open(&dir.join("data").join("users.json"))?),
         sessions: Mutex::new(Sessions::default()),
+        tickets: Mutex::new(Tickets::default()),
         limiter: Mutex::new(Limiter::default()),
         settings: Store::open(&dir.join("config"))?,
         audit: Audit::open(&dir.join("data"))?,
@@ -68,6 +79,7 @@ pub fn rig(name: &str) -> Result<Rig, Fault> {
         static_dir: None,
         clock: Box::new(move || clock.load(Ordering::SeqCst)),
         secure: false,
+        require_mfa,
     });
     Ok(Rig { app: router(Arc::clone(&state)), state, now, dir })
 }
