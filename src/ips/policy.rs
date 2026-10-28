@@ -170,6 +170,22 @@ impl Rule {
     }
 }
 
+/// Every line of `content` that `Policy::parse` would drop, with the reason
+/// (1-based line numbers). Empty when the whole file reads.
+pub fn check(content: &str) -> Vec<(usize, String)> {
+    let mut bad = Vec::new();
+    for (index, text) in content.lines().enumerate() {
+        let text = text.trim();
+        if text.is_empty() || text.starts_with('#') {
+            continue;
+        }
+        if let Err(why) = rule_of(index + 1, text) {
+            bad.push((index + 1, why));
+        }
+    }
+    bad
+}
+
 impl Policy {
     /// Read a policy. Returns the rules and how many lines were dropped.
     pub fn parse(content: &str) -> (Self, usize) {

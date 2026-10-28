@@ -1,0 +1,90 @@
+/* packetdeath console: low-saturation indigo ground, one amber accent. */
+:root, :root[data-theme="dark"] {
+  --bg: #11131c; --panel: #181b27; --raise: #20243a; --line: #2f3556;
+  --text: #e7e9f4; --muted: #9aa1c2; --accent: #f0b44a; --accent-ink: #1a1405;
+  --danger: #ff8a80; --ok: #6fd6a4; --focus: #8fb0ff;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f2f3f8; --panel: #ffffff; --raise: #e9ebf5; --line: #c9cde2;
+  --text: #171a2b; --muted: #565d80; --accent: #9a5b00; --accent-ink: #ffffff;
+  --danger: #b3261e; --ok: #11704c; --focus: #2b55c9;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+[hidden] { display: none !important; }
+
+/* sign-in */
+.auth-root { min-height: 100vh; }
+.auth-figure { position: fixed; top: 48px; left: 50%; width: 160px; height: 160px; margin-left: -80px; }
+.auth-utilities { position: fixed; top: 16px; right: 16px; display: flex; gap: 12px; align-items: center; }
+.auth-stage { min-height: 100vh; display: flex; justify-content: center; padding: 240px 16px 48px; }
+.auth-form { width: 300px; display: flex; flex-direction: column; gap: 14px; }
+.auth-fields { display: flex; flex-direction: column; gap: 10px; }
+.auth-field { display: block; }
+.auth-control { display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.auth-control:focus-within { border-color: var(--focus); }
+.auth-control input { flex: 1; min-width: 0; height: 42px; background: transparent; border: 0; color: inherit; font: inherit; }
+.auth-control input:focus-visible { outline: none; }
+.field-icon { color: var(--muted); flex: none; }
+.password-visibility { flex: none; width: 32px; height: 32px; background: transparent; border: 0; color: var(--muted); cursor: pointer; border-radius: 6px; }
+.password-visibility-icon { display: block; position: relative; width: 18px; height: 11px; margin: 0 auto; border: 2px solid currentColor; border-radius: 50%; }
+.password-visibility-icon::after { content: ""; position: absolute; left: 4px; top: 1px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.password-visibility[aria-pressed="true"] .password-visibility-icon { border-style: dashed; }
+
+button { font: inherit; cursor: pointer; }
+.primary { height: 42px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 600; padding: 0 18px; }
+.primary:disabled { opacity: .55; cursor: progress; }
+.quiet { background: transparent; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+.quiet:hover { background: var(--raise); }
+.danger { color: var(--danger); }
+.notice { margin: 0; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+.notice-danger { color: var(--danger); border-color: var(--danger); }
+.notice-ok { color: var(--ok); border-color: var(--ok); }
+
+/* the switch shows the state itself: on is dark */
+.switch { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.switch-track { position: relative; width: 38px; height: 22px; border-radius: 11px; border: 1px solid var(--line); background: var(--raise); padding: 0; }
+.switch-thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: left .12s; }
+.switch-track[aria-checked="true"] { background: var(--accent); }
+.switch-track[aria-checked="true"] .switch-thumb { left: 18px; background: var(--accent-ink); }
+select, textarea, .create input, td input { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font: inherit; padding: 4px 8px; }
+
+/* shell */
+.band { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.band-brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tab { background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; padding: 6px 12px; }
+.tab-on { color: var(--text); border-bottom-color: var(--accent); }
+.band-end { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.who { color: var(--muted); font-size: 13px; }
+.screen { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+
+/* status */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 0 0 16px; }
+.card h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+.grid { width: 100%; border-collapse: collapse; }
+.grid td, .grid th { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+.grid .n { text-align: right; font-variant-numeric: tabular-nums; }
+.big { font-size: 20px; }
+.absent { color: var(--muted); }
+
+/* editor */
+.pickers { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.pick { background: var(--panel); color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px; }
+.pick-on { color: var(--text); border-color: var(--accent); }
+.hint { color: var(--muted); font-size: 13px; margin: 6px 0; }
+.code { width: 100%; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+.bad-lines { color: var(--danger); padding-left: 20px; }
+
+/* users */
+.wide { margin-bottom: 16px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.create { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.boot { padding: 48px 16px; text-align: center; }
+
+@media (max-width: 520px) { .auth-stage { padding-top: 220px; } .auth-utilities { flex-wrap: wrap; justify-content: flex-end; } }

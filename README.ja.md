@@ -33,6 +33,8 @@ packetdeath は、段を重ねて作ってあります。
 | 11 WAF | web server の前に置く reverse proxy。すべての request を内蔵の規則で採点し、閾値を超えたものを断る、または記録だけする。回数の制限と、繰り返す相手の締め出しもする | `waf` `waf-test` `waf-report` |
 | 12 IPS の policy | Suricata の警告ごとに「止める」「記録」「無視」を決める。繰り返しを待ってから止める。gateway、名前解決の宛先、loopback は止めない。止めた宛先を再起動をまたいで残し、記録を書く | `--ips-policy` `--ips-never` `--ips-state` `ips-test` `ips-report` |
 
+| 13 WebApp | ブラウザの管理画面(Rust の server と、WebAssembly の Dioxus の画面)。サインイン、役つきの利用者の管理、IPS、IDS、WAF、アンチウイルスの設定の編集(保存のたびに本体と同じ読み取り器で検査する)、WAF と IPS の状況の表示 | `webapp/`(`packetdeath-webapp --data --config --logs --static`) |
+
 4 から 12 の詳しい説明は、「詳細な動作」と「能動防御」の節にあります。
 4 は Suricata、8 は ClamAV と利用者が入れる証明書を使います。
 Suricata と ClamAV は別に入れる道具で、このリポジトリには入っていません。
@@ -1233,6 +1235,7 @@ pktmon の後始末(`pktmon stop`、`pktmon filter remove`、`pktmon status`、�
 
 - `docs/design.md`：設計と受入 ID(日本語)。
   何を測れば通りかが、command と期待する出力で書いてある。
+- `webapp/docs/design.ja.md` と `webapp/docs/operations.ja.md`: 管理画面の設計(受入 ID は PK-190 から PK-202)と運用の手順。
 - `docs/mitm-runbook.md`：通信の中身を検査する方式の運用手順(日本語)。
 - `blocklists/README.md`：同梱の blocklist の出所と、止めてはいけない物。
 - `allowlists/README.md`：同梱の allowlist の出所と件数。

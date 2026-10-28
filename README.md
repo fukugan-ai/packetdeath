@@ -32,6 +32,7 @@ Every stage works only when you pass its options.
 | 10 Active defense | Cuts destinations whose certificate chain has been announced as untrustworthy; the blocking side can be put back to watch-only with one action | `--distrust` `--watch-distrust` `--probe-chains` `--defense-off` `--breaker-hosts` |
 | 11 WAF | A reverse proxy in front of your web server that scores every request against built-in rules and refuses, or only records, those over the threshold; it also limits rates and bans repeat offenders | `waf` `waf-test` `waf-report` |
 | 12 IPS policy | Decides per Suricata alert whether to stop, record or ignore, waits for repeated alerts before stopping, never stops the gateway, resolvers or loopback, keeps stopped destinations across a restart, and writes an audit log | `--ips-policy` `--ips-never` `--ips-state` `ips-test` `ips-report` |
+| 13 WebApp | A browser console (Rust server, Dioxus screens in WebAssembly) to sign in, manage users with roles, edit the IPS, IDS, WAF and antivirus settings with the tool's own parsers checking every save, and read the WAF and IPS status | `webapp/` (`packetdeath-webapp --data --config --logs --static`) |
 
 Stages 4 to 12 are explained in "Details" and "Active defense".
 Stage 4 uses Suricata, and stage 8 uses ClamAV and a certificate that you install.
@@ -1227,6 +1228,7 @@ That the service cuts a connection has not been confirmed (PW-7 did not pass).
 
 - `docs/design.md`: the design and the acceptance IDs (in Japanese).
   It states what to measure for a pass, with commands and expected output.
+- `webapp/docs/design.ja.md` and `webapp/docs/operations.ja.md`: the console's design with acceptance IDs PK-190 to PK-202, and how to run it (in Japanese).
 - `docs/mitm-runbook.md`: the operating procedure for content inspection (in Japanese).
 - `blocklists/README.md`: where the bundled blocklist came from, and what must never be added to it.
 - `allowlists/README.md`: where the bundled allowlists came from, and their counts.

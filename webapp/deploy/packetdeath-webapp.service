@@ -1,0 +1,36 @@
+# packetdeath console (127.0.0.1:8088, the browser screens for the IPS, IDS, WAF and antivirus settings).
+# A template: replace the account name and the /opt/packetdeath paths with your own before installing.
+# Undo, one operation:
+#   sudo systemctl disable --now packetdeath-webapp
+# Then, to remove it completely:
+#   sudo rm /etc/systemd/system/packetdeath-webapp.service && sudo systemctl daemon-reload
+# The console only edits the files under /opt/packetdeath/webapp/config; the tool rereads the hot ones by itself.
+# It listens on 127.0.0.1 only. Put a TLS-terminating reverse proxy in front before listening elsewhere
+# (then add --allow-remote and --secure).
+[Unit]
+Description=packetdeath console (127.0.0.1:8088)
+After=network.target
+
+[Service]
+Type=simple
+User=packetdeath
+ExecStart=/opt/packetdeath/webapp/bin/packetdeath-webapp \
+  --listen 127.0.0.1:8088 \
+  --data /opt/packetdeath/webapp/data \
+  --config /opt/packetdeath/webapp/config \
+  --logs /opt/packetdeath/log-block \
+  --static /opt/packetdeath/webapp/ui
+Restart=on-failure
+RestartSec=5
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/packetdeath/webapp
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

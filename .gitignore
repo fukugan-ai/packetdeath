@@ -1,5 +1,8 @@
 # Rust
 /target/
+/webapp/target/
+/webapp/ui/target/
+/webapp/ui/dist/
 **/*.rs.bk
 
 # 🔴 CA の秘密鍵と証明書。1度でも commit したら、履歴から消えない。

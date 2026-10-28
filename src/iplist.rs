@@ -128,6 +128,20 @@ impl From<std::io::Error> for IpListError {
     }
 }
 
+/// `content` の中で IP / CIDR として読めない行（1 始まりの行番号）。
+/// 空行と `#` の行は数えない。`parse` が飛ばす行と一致する。
+pub fn check(content: &str) -> Vec<usize> {
+    content
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            let trimmed = line.trim();
+            !trimmed.is_empty() && !trimmed.starts_with('#') && parse_line(line).is_none()
+        })
+        .map(|(index, _)| index + 1)
+        .collect()
+}
+
 impl IpList {
     /// 何にも当たらない空の iplist（PK-50 の陰性対照）。
     pub fn empty() -> Self {
