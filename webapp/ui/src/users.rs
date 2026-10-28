@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 use wasm_bindgen_futures::spawn_local;
 
 use crate::api;
+use crate::generate;
 use crate::i18n::{error_line, t, word};
+use crate::passkey;
 use crate::Me;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -41,6 +43,7 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
     let mut new_name = use_signal(String::new);
     let mut new_password = use_signal(String::new);
     let mut new_confirm = use_signal(String::new);
+    let mut show_new = use_signal(|| false);
     let mut new_role = use_signal(|| String::from("viewer"));
     let csrf = user.csrf.clone();
 
@@ -95,9 +98,15 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
             form { class: "card create", onsubmit: create,
                 input { r#type: "text", id: "new-username", name: "username", value: "{new_name}", placeholder: "{t(&l, \"name\")}", maxlength: 128, required: true, autocomplete: "username",
                     oninput: move |event| new_name.set(event.value()) }
-                input { r#type: "password", id: "new-user-password", name: "new-password", value: "{new_password}", placeholder: "{t(&l, \"password_new\")}", minlength: "128", required: true, autocomplete: "new-password",
+                button { class: "quiet", r#type: "button", id: "new-user-generate",
+                    onclick: move |_| match generate::password() {
+                        Ok(fresh) => { new_password.set(fresh.clone()); new_confirm.set(fresh); show_new.set(true); }
+                        Err(why) => error.set(passkey::browser_line(&lang(), &why)),
+                    },
+                    "{t(&l, \"password_generate\")}" }
+                input { r#type: if show_new() { "text" } else { "password" }, id: "new-user-password", name: "new-password", value: "{new_password}", placeholder: "{t(&l, \"password_new\")}", minlength: "128", required: true, autocomplete: "new-password",
                     oninput: move |event| new_password.set(event.value()) }
-                input { r#type: "password", id: "new-user-password-confirm", name: "new-password-confirm", value: "{new_confirm}", placeholder: "{t(&l, \"password_again\")}", minlength: "128", required: true, autocomplete: "new-password",
+                input { r#type: if show_new() { "text" } else { "password" }, id: "new-user-password-confirm", name: "new-password-confirm", value: "{new_confirm}", placeholder: "{t(&l, \"password_again\")}", minlength: "128", required: true, autocomplete: "new-password",
                     oninput: move |event| new_confirm.set(event.value()) }
                 select { value: "{new_role}", onchange: move |event| new_role.set(event.value()),
                     for role in ROLES { option { key: "{role}", value: "{role}", "{word(&l, \"role\", role)}" } }
@@ -111,6 +120,7 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
 #[component]
 fn UserRow(row: Row, lang: Signal<String>, act: Callback<(&'static str, String, Value)>) -> Element {
     let mut password = use_signal(String::new);
+    let mut shown = use_signal(|| false);
     let l = lang();
     let path = format!("/api/users/{}", row.name);
     let (role_path, off_path, pass_path, drop_path) = (path.clone(), path.clone(), path.clone(), path);
@@ -133,7 +143,10 @@ fn UserRow(row: Row, lang: Signal<String>, act: Callback<(&'static str, String, 
                 form { class: "actions",
                     onsubmit: move |event| { event.prevent_default(); act.call(("PATCH", pass_path.clone(), json!({"password": password()}))); password.set(String::new()); },
                     input { r#type: "text", name: "username", value: "{row.name}", autocomplete: "username", hidden: true, readonly: true }
-                    input { r#type: "password", name: "new-password", value: "{password}", placeholder: "{t(&l, \"password_new\")}", minlength: "128", required: true, autocomplete: "new-password",
+                    button { class: "quiet", r#type: "button",
+                        onclick: move |_| { if let Ok(fresh) = generate::password() { password.set(fresh); shown.set(true); } },
+                        "{t(&l, \"password_generate\")}" }
+                    input { r#type: if shown() { "text" } else { "password" }, name: "new-password", value: "{password}", placeholder: "{t(&l, \"password_new\")}", minlength: "128", required: true, autocomplete: "new-password",
                         oninput: move |event| password.set(event.value()) }
                     button { class: "quiet", r#type: "submit", "{t(&l, \"set_password\")}" }
                 }

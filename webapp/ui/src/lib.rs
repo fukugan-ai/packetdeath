@@ -14,6 +14,7 @@ use wasm_bindgen_futures::spawn_local;
 pub mod api;
 pub mod credential;
 pub mod editor;
+pub mod generate;
 pub mod i18n;
 pub mod mark;
 pub mod passkey;

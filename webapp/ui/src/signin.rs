@@ -11,6 +11,7 @@ use wasm_bindgen_futures::spawn_local;
 use crate::i18n::{error_line, error_word, t};
 use crate::passkey;
 use crate::credential;
+use crate::generate;
 use crate::api;
 use crate::mark::{LockIcon, Mark, PersonIcon};
 use crate::theme;
@@ -66,6 +67,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
     let mut has_passkey = use_signal(|| false);
     // The password typed in the first step, held until the second step ends so the browser can be offered the pair.
     let mut kept = use_signal(String::new);
+    let mut made = use_signal(|| false);
     let l = lang();
     let title = t(&l, if first_run { "register" } else { "sign_in" });
     let password_label = t(&l, if first_run { "password_new" } else { "password" });
@@ -121,6 +123,17 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
             }
             busy.set(false);
         });
+    };
+
+    let generate = move |_| match generate::password() {
+        Ok(fresh) => {
+            password.set(fresh.clone());
+            confirm.set(fresh);
+            reveal.set(true);
+            made.set(true);
+            error.set(String::new());
+        }
+        Err(why) => error.set(passkey::browser_line(&lang(), &why)),
     };
 
     let use_passkey = move |_| {
@@ -242,6 +255,8 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                             }
                         }
                         if first_run {
+                            button { class: "quiet", r#type: "button", id: "password-generate", onclick: generate, "{t(&l, \"password_generate\")}" }
+                            p { class: "hint", id: "password-generated", hidden: !made(), "{t(&l, \"password_generated\")}" }
                             label { class: "auth-field",
                                 span { class: "sr-only", "{t(&l, \"password_again\")}" }
                                 span { class: "auth-control auth-control-password",
