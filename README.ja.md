@@ -33,7 +33,7 @@ packetdeath は、段を重ねて作ってあります。
 | 11 WAF | web server の前に置く reverse proxy。すべての request を内蔵の規則で採点し、閾値を超えたものを断る、または記録だけする。回数の制限と、繰り返す相手の締め出しもする | `waf` `waf-test` `waf-report` |
 | 12 IPS の policy | Suricata の警告ごとに「止める」「記録」「無視」を決める。繰り返しを待ってから止める。gateway、名前解決の宛先、loopback は止めない。止めた宛先を再起動をまたいで残し、記録を書く | `--ips-policy` `--ips-never` `--ips-state` `ips-test` `ips-report` |
 
-| 13 WebApp | ブラウザの管理画面(Rust の server と、WebAssembly の Dioxus の画面)。サインイン、役つきの利用者の管理、IPS、IDS、WAF、アンチウイルスの設定の編集(保存のたびに本体と同じ読み取り器で検査する)、WAF と IPS の状況の表示 | `webapp/`(`packetdeath-webapp --data --config --logs --static`) |
+| 13 WebApp | ブラウザの管理画面(Rust の server と、WebAssembly の Dioxus の画面)。サインイン(パスワードと第二要素。認証アプリの QR コードと回復コード、passkey)、役つきの利用者の管理、IPS、IDS、WAF、アンチウイルスの設定の編集(保存のたびに本体と同じ読み取り器で検査する)、基本ルールの用意、WAF と IPS の状況の表示 | `webapp/`(`packetdeath-webapp --data --config --logs --static`)。使い方は「webapp：ブラウザの管理画面」 |
 
 4 から 12 の詳しい説明は、「詳細な動作」と「能動防御」の節にあります。
 4 は Suricata、8 は ClamAV と利用者が入れる証明書を使います。
@@ -863,6 +863,39 @@ rule、除外、3 つの address の file は、動いている間に書き換�
 | `--log-dir` | `<path>` | `ips.jsonl` を置いた folder | なし | 必須 |
 | `--since` | `YYYY-MM-DD` | この日より前の行を除く | なし | 任意 |
 
+### webapp：ブラウザの管理画面
+
+IPS、IDS、WAF、アンチウイルスの設定を、ブラウザで編集する画面です。
+保存のたびに、本体と同じ読み取り器で検査します。読めない行があれば、保存せずに行番号を返します。
+本体は WebApp を起動も停止もしません。
+
+最短の手順は 3 つです。
+
+1. 画面を作る：`cd webapp/ui && ./build.sh`
+2. server を作る：`cd webapp && cargo build --release`
+3. 起動して、`http://127.0.0.1:8088/` を開く：`webapp/target/release/packetdeath-webapp --data <dir> --config <dir> --logs <dir> --static webapp/ui/dist`
+
+最初の画面で、最初の管理者を登録します。
+パスワードは 128 文字以上です。Chrome が提案するパスワードは 15 文字なので届きません。登録の画面の「128 文字のパスワードを作る」ボタンを使うと、128 文字を作ってブラウザのパスワード管理へ渡します。
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--data` | `<dir>` | `users.json` と `webapp.jsonl` を置く場所 | なし | 必須 |
+| `--config` | `<dir>` | 編集する設定 file と、世代(`backups/`)を置く場所 | なし | 必須 |
+| `--logs` | `<dir>` | `waf.jsonl` と `ips.jsonl` を読む場所 | なし | 必須 |
+| `--static` | `<dir>` | 画面の file(`webapp/ui/dist/`) | なし | 任意 |
+| `--listen` | `<addr:port>` | 待ち受け | `127.0.0.1:8088` | 任意 |
+| `--allow-remote` | なし | `127.0.0.1` 以外で待つことを許す | 許さない | 任意 |
+| `--secure` | なし | cookie に `Secure` を付ける(TLS の後ろに置くとき) | 付けない | 任意 |
+| `--rp-id` `--origin` | 名前 と URL | passkey を有効にする。`--origin` はブラウザの URL と一字違わず合わせる。HTTPS か localhost で開いたときだけ使える | 無効 | 任意(2 つ一緒) |
+| `--second-factor-optional` | なし | 運用者と管理者が、第二要素なしで設定を変えられるようにする | 第二要素が要る | 任意 |
+
+サインインは、パスワードのあとに第二要素を求めます。第二要素は、認証アプリの 6 桁のコード(設定の画面の QR コードを読み取る)、使い捨ての回復コード 10 本、passkey のどれかです。
+運用者と管理者は、第二要素を有効にするまで設定を変えられません。
+TLS は持ちません。外から使うときは、TLS を終端する reverse proxy の後ろに置き、`--allow-remote` と `--secure` を付けます。
+
+基本ルール(`webapp/deploy/baseline/`)を `--config` の場所へ複写すると、IPS は severity 1 を落とし、severity 2 を 60 秒に 10 回で 900 秒落とし、公開 DNS の resolver を決して落としません。WAF は内蔵の 44 rule に、設定の file をつなぎます。複写と戻し方は `webapp/docs/operations.ja.md` にあります。
+
 ## 詳細な動作
 
 | したいこと | 使う物 |
@@ -1235,7 +1268,7 @@ pktmon の後始末(`pktmon stop`、`pktmon filter remove`、`pktmon status`、�
 
 - `docs/design.md`：設計と受入 ID(日本語)。
   何を測れば通りかが、command と期待する出力で書いてある。
-- `webapp/docs/design.ja.md` と `webapp/docs/operations.ja.md`: 管理画面の設計(受入 ID は PK-190 から PK-202)と運用の手順。
+- `webapp/docs/design.ja.md` と `webapp/docs/operations.ja.md`: 管理画面の設計(受入 ID は PK-190 から PK-216)と運用の手順。`webapp/docs/open-decisions.ja.md` は、残る判断とそれぞれを止めている物。
 - `docs/mitm-runbook.md`：通信の中身を検査する方式の運用手順(日本語)。
 - `blocklists/README.md`：同梱の blocklist の出所と、止めてはいけない物。
 - `allowlists/README.md`：同梱の allowlist の出所と件数。

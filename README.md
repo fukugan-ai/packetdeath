@@ -32,7 +32,7 @@ Every stage works only when you pass its options.
 | 10 Active defense | Cuts destinations whose certificate chain has been announced as untrustworthy; the blocking side can be put back to watch-only with one action | `--distrust` `--watch-distrust` `--probe-chains` `--defense-off` `--breaker-hosts` |
 | 11 WAF | A reverse proxy in front of your web server that scores every request against built-in rules and refuses, or only records, those over the threshold; it also limits rates and bans repeat offenders | `waf` `waf-test` `waf-report` |
 | 12 IPS policy | Decides per Suricata alert whether to stop, record or ignore, waits for repeated alerts before stopping, never stops the gateway, resolvers or loopback, keeps stopped destinations across a restart, and writes an audit log | `--ips-policy` `--ips-never` `--ips-state` `ips-test` `ips-report` |
-| 13 WebApp | A browser console (Rust server, Dioxus screens in WebAssembly) to sign in, manage users with roles, edit the IPS, IDS, WAF and antivirus settings with the tool's own parsers checking every save, and read the WAF and IPS status | `webapp/` (`packetdeath-webapp --data --config --logs --static`) |
+| 13 WebApp | A browser console (Rust server, Dioxus screens in WebAssembly) to sign in (password plus a second factor: an authenticator app with a QR code and recovery codes, or a passkey), manage users with roles, edit the IPS, IDS, WAF and antivirus settings with the tool's own parsers checking every save, start from baseline rules, and read the WAF and IPS status | `webapp/` (`packetdeath-webapp --data --config --logs --static`). See "webapp: the browser console" |
 
 Stages 4 to 12 are explained in "Details" and "Active defense".
 Stage 4 uses Suricata, and stage 8 uses ClamAV and a certificate that you install.
@@ -860,6 +860,39 @@ The events are written to `ips.jsonl` in the log folder (`drop`, `observed`, `ig
 | `--log-dir` | `<path>` | The folder that holds `ips.jsonl` | None | Required |
 | `--since` | `YYYY-MM-DD` | Leave out lines before this day | None | Optional |
 
+### webapp: the browser console
+
+A screen in the browser for editing the IPS, IDS, WAF and antivirus settings.
+Every save is checked by the tool's own parsers. A file with an unreadable line is not saved; the line numbers come back instead.
+The tool itself never starts or stops the console.
+
+The shortest way is three steps.
+
+1. Build the screens: `cd webapp/ui && ./build.sh`
+2. Build the server: `cd webapp && cargo build --release`
+3. Start it and open `http://127.0.0.1:8088/`: `webapp/target/release/packetdeath-webapp --data <dir> --config <dir> --logs <dir> --static webapp/ui/dist`
+
+The first screen registers the first administrator.
+A password is 128 characters or more. The password Chrome suggests is 15 characters, so it falls short. The "Generate a 128-character password" button on the registration screen draws 128 characters and hands them to the browser's password manager.
+
+| option | value | what it does | default | required |
+|---|---|---|---|---|
+| `--data` | `<dir>` | where `users.json` and `webapp.jsonl` live | none | yes |
+| `--config` | `<dir>` | where the editable settings and their generations (`backups/`) live | none | yes |
+| `--logs` | `<dir>` | where `waf.jsonl` and `ips.jsonl` are read | none | yes |
+| `--static` | `<dir>` | the screen files (`webapp/ui/dist/`) | none | no |
+| `--listen` | `<addr:port>` | the address to listen on | `127.0.0.1:8088` | no |
+| `--allow-remote` | none | allow listening on something other than `127.0.0.1` | not allowed | no |
+| `--secure` | none | put `Secure` on the cookie (behind TLS) | off | no |
+| `--rp-id` `--origin` | name and URL | turn passkeys on. `--origin` must match the browser's URL exactly. Passkeys work only on HTTPS or localhost | off | no (together) |
+| `--second-factor-optional` | none | let operators and administrators change settings without a second factor | a second factor is required | no |
+
+Sign-in asks for a second factor after the password: the 6-digit code of an authenticator app (scan the QR code on the settings screen), one of 10 one-time recovery codes, or a passkey.
+Operators and administrators cannot change settings until a second factor is on.
+The console has no TLS of its own. To use it from outside, put it behind a reverse proxy that ends TLS and add `--allow-remote` and `--secure`.
+
+Copy the baseline rules (`webapp/deploy/baseline/`) into the `--config` folder and the IPS drops severity 1, drops severity 2 after 10 alerts in 60 seconds for 900 seconds, and never drops a public DNS resolver. The WAF keeps its 44 built-in rules and reads the console's files. The copy steps and the way back are in `webapp/docs/operations.ja.md` (in Japanese).
+
 ## Details
 
 | You want to | Use |
@@ -1228,7 +1261,7 @@ That the service cuts a connection has not been confirmed (PW-7 did not pass).
 
 - `docs/design.md`: the design and the acceptance IDs (in Japanese).
   It states what to measure for a pass, with commands and expected output.
-- `webapp/docs/design.ja.md` and `webapp/docs/operations.ja.md`: the console's design with acceptance IDs PK-190 to PK-202, and how to run it (in Japanese).
+- `webapp/docs/design.ja.md` and `webapp/docs/operations.ja.md`: the console's design with acceptance IDs PK-190 to PK-216, and how to run it (in Japanese). `webapp/docs/open-decisions.ja.md` lists the decisions still open and what holds each one.
 - `docs/mitm-runbook.md`: the operating procedure for content inspection (in Japanese).
 - `blocklists/README.md`: where the bundled blocklist came from, and what must never be added to it.
 - `allowlists/README.md`: where the bundled allowlists came from, and their counts.

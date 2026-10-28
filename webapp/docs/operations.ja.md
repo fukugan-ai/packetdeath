@@ -22,6 +22,9 @@ WebApp は本体が読み直す設定 file を、本体と同じ読み取り器�
 | `--listen` | `<addr:port>` | 待ち受け | `127.0.0.1:8088` | 任意 |
 | `--allow-remote` | なし | `127.0.0.1` 以外で待つことを許す | 許さない | 任意 |
 | `--secure` | なし | cookie に `Secure` を付ける（TLS の後ろに置くとき） | 付けない | 任意 |
+| `--rp-id` | `<名前>` | passkey を結びつける名前（画面を開く URL の host）。`--origin` と一緒に与える | なし（passkey は無効） | 任意 |
+| `--origin` | `<URL>` | 画面を開く URL（例 `https://console.example.test`）。ブラウザの URL と一字違わず合わせる | なし | `--rp-id` と対 |
+| `--second-factor-optional` | なし | 運用者と管理者が、第二要素が無くても設定を変えられるようにする | 第二要素が要る | 任意 |
 
 TLS は持たない。外から使うときは、TLS を終端する reverse proxy の後ろに置き、`--allow-remote` と `--secure` を付ける。
 
