@@ -152,7 +152,7 @@ server の拒否は、すべて `{"error": 文, "code": 番号}` で返る。番
 | 外部の認証（OAuth、メール） | 外へ出る連絡手段を持たない。単独の host で閉じる |
 | 画面を JavaScript で書く | 画面は Dioxus（Rust / WASM）にそろえる |
 
-### 段階14 第二要素（設計、未実装）
+### 段階14 第二要素（TOTP、回復コード、passkey の server と画面を実装済み）
 
 **最新情報** 取得 2026-10-28。NIST SP 800-63B-4（https://pages.nist.gov/800-63-4/sp800-63b.html）は、AAL2 で「少なくとも 1 つの phishing 耐性のある選択肢を出す」ことを求め、AAL3 では非エクスポートの暗号鍵だけを認める。メールは「out-of-band 認証に使ってはならない」とあり、アドレスの確認コードと回復 code は認証ではない。手で入力する code（OTP、out-of-band）は phishing 耐性とは数えない。
 
@@ -183,7 +183,7 @@ TOTP と回復 code は secure context を要らず、どの PC の http でも�
 | **PK-210** | TOTP の秘密は、確認コードを 1 回通すまで有効にならない | server の test |
 | **PK-211** | password が合っても、第二要素を通すまで session が作られない | server の test |
 | **PK-212** | 使った TOTP コードの再利用と、±1 窓の外のコードを断る | server の test |
-| **PK-213** | 回復 code は hash で保存され、1 回で消える | server の test |
+| **PK-213** | 回復 code は hash で保存され、1 回で消える。TOTP を持たず passkey だけの利用者も、回復 code でサインインできる | server の test（`pk214_a_recovery_code_signs_in_a_user_who_has_only_a_passkey`） |
 | **PK-214** | WebAuthn は rp_id と origin に束縛され、署名回数が戻る応答を断る | server の test |
 | **PK-215** | 第二要素が未登録の管理者は、設定の変更と利用者の管理を断られる | server の test |
 | **PK-216** | 画面：登録、サインインの第二段階、回復 code の表示が browser で動く | 画面試験の席 |

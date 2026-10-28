@@ -353,15 +353,14 @@ impl Users {
     /// A second factor typed at sign-in: the current code, or one unused recovery code (taken once).
     pub fn second_factor(&mut self, name: &str, typed: &str, now: u64) -> Result<bool, UserError> {
         let at = self.index(name)?;
-        let Some(active) = self.list[at].totp.clone().filter(|t| t.active) else {
-            return Ok(false);
-        };
-        let secret = totp::secret_from_text(&active.secret).map_err(|e| UserError::Store(format!("{e:?}")))?;
-        let verified = totp::verify(&secret, typed, now, active.last_step).map_err(|e| UserError::Store(format!("{e:?}")))?;
-        if let Some(step) = verified {
-            self.list[at].totp = Some(Totp { last_step: Some(step), ..active });
-            self.save()?;
-            return Ok(true);
+        if let Some(active) = self.list[at].totp.clone().filter(|t| t.active) {
+            let secret = totp::secret_from_text(&active.secret).map_err(|e| UserError::Store(format!("{e:?}")))?;
+            let verified = totp::verify(&secret, typed, now, active.last_step).map_err(|e| UserError::Store(format!("{e:?}")))?;
+            if let Some(step) = verified {
+                self.list[at].totp = Some(Totp { last_step: Some(step), ..active });
+                self.save()?;
+                return Ok(true);
+            }
         }
         let digest = recovery_digest(typed);
         let Some(used) = self.list[at].recovery.iter().position(|kept| *kept == digest) else {

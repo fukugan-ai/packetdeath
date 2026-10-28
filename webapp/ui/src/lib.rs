@@ -15,6 +15,7 @@ pub mod api;
 pub mod editor;
 pub mod i18n;
 pub mod mark;
+pub mod passkey;
 pub mod security;
 pub mod shell;
 pub mod signin;

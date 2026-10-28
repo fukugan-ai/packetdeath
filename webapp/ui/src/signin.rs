@@ -8,8 +8,9 @@ use dioxus::prelude::*;
 use serde_json::{json, Value};
 use wasm_bindgen_futures::spawn_local;
 
-use crate::api;
 use crate::i18n::{error_line, error_word, t};
+use crate::passkey;
+use crate::api;
 use crate::mark::{LockIcon, Mark, PersonIcon};
 use crate::theme;
 use crate::{me_of, Me};
@@ -22,6 +23,19 @@ fn ticket_of(body: &Value) -> Option<String> {
     body.get("ticket")?.as_str().map(str::to_owned)
 }
 
+/// Whether the sign-in waiting for its second step may use a passkey.
+fn passkey_of(body: &Value) -> bool {
+    body.get("webauthn").and_then(Value::as_bool) == Some(true)
+}
+
+/// The second step with a passkey: the options for the ticket, the browser's answer, then the console's. Errors come back as the line to show.
+async fn sign_with_passkey(ticket: &str, lang: &str) -> Result<Value, String> {
+    let options = api::send("POST", "/api/login/webauthn/begin", "", &json!({"ticket": ticket})).await.map_err(|failed| error_line(lang, &failed))?;
+    let mut answer = passkey::sign(&options).await.map_err(|why| passkey::browser_line(lang, &why))?;
+    answer["ticket"] = json!(ticket);
+    api::send("POST", "/api/login/webauthn/finish", "", &answer).await.map_err(|failed| error_line(lang, &failed))
+}
+
 #[component]
 pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Signal<Option<Me>>) -> Element {
     let mut name = use_signal(String::new);
@@ -32,6 +46,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
     let mut ticket = use_signal(|| None::<String>);
     let mut code = use_signal(String::new);
     let mut confirm = use_signal(String::new);
+    let mut has_passkey = use_signal(|| false);
     let l = lang();
     let title = t(&l, if first_run { "register" } else { "sign_in" });
     let password_label = t(&l, if first_run { "password_new" } else { "password" });
@@ -63,6 +78,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                 Ok(body) => match (ticket_of(&body), me_of(&body)) {
                     (Some(id), _) => {
                         password.set(String::new());
+                        has_passkey.set(passkey_of(&body));
                         ticket.set(Some(id));
                     }
                     (None, Some(found)) => {
@@ -78,6 +94,35 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                         ticket.set(None);
                     }
                     error.set(error_line(&lang(), &failed));
+                }
+            }
+            busy.set(false);
+        });
+    };
+
+    let use_passkey = move |_| {
+        if busy() {
+            return;
+        }
+        let Some(id) = ticket() else {
+            return;
+        };
+        busy.set(true);
+        error.set(String::new());
+        spawn_local(async move {
+            match sign_with_passkey(&id, &lang()).await {
+                Ok(body) => match me_of(&body) {
+                    Some(found) => {
+                        ticket.set(None);
+                        me.set(Some(found));
+                    }
+                    None => error.set(error_word(&lang(), 0)),
+                },
+                Err(line) => {
+                    if line.contains("PD_AUTH_TICKET") {
+                        ticket.set(None);
+                    }
+                    error.set(line);
                 }
             }
             busy.set(false);
@@ -107,6 +152,9 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                 form { id: "authForm", class: "auth-form", onsubmit: submit, novalidate: true,
                     p { class: "notice notice-danger", role: "alert", hidden: error.read().is_empty(), "{error}" }
                     if ticket().is_some() {
+                        if has_passkey() {
+                            button { class: "primary", r#type: "button", id: "second-passkey", disabled: busy(), onclick: use_passkey, "{t(&l, \"second_passkey\")}" }
+                        }
                         div { class: "auth-fields",
                             label { class: "auth-field",
                                 span { "{t(&l, \"second_hint\")}" }

@@ -143,6 +143,26 @@ async fn pk214_a_passkey_is_added_and_signs_in_and_the_counter_must_rise() -> Re
 }
 
 #[tokio::test]
+async fn pk214_a_recovery_code_signs_in_a_user_who_has_only_a_passkey() -> Result<(), Fault> {
+    let r = rig_with_passkeys("pk214-recovery")?;
+    let alice = r.register("alice").await?;
+    let key = Authenticator::new()?;
+    let added = add_passkey(&r, &alice, &key).await?;
+    let code = text_of(&json!({"c": added["recovery"][0]}), "c")?.to_owned();
+
+    let (ticket, _) = ask(&r).await?;
+    let wrong = r.call(Method::POST, "/api/login/second", None, false, Some(json!({"ticket": ticket, "code": "000000"}))).await?;
+    assert_eq!(wrong.status, StatusCode::UNAUTHORIZED, "{}", wrong.text);
+    let through = r.call(Method::POST, "/api/login/second", None, false, Some(json!({"ticket": ticket, "code": code}))).await?;
+    assert_eq!(through.status, StatusCode::OK, "{}", through.text);
+
+    let (again, _) = ask(&r).await?;
+    let spent = r.call(Method::POST, "/api/login/second", None, false, Some(json!({"ticket": again, "code": code}))).await?;
+    assert_eq!(spent.status, StatusCode::UNAUTHORIZED, "a recovery code works once");
+    Ok(())
+}
+
+#[tokio::test]
 async fn pk214_a_phishing_origin_a_stranger_key_and_an_old_challenge_are_refused() -> Result<(), Fault> {
     let r = rig_with_passkeys("pk214-refuse")?;
     let alice = r.register("alice").await?;

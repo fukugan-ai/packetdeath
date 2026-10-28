@@ -7,9 +7,8 @@ use dioxus::prelude::*;
 use serde_json::{json, Value};
 use wasm_bindgen_futures::spawn_local;
 
-use crate::api;
 use crate::i18n::{error_line, error_word, t};
-use crate::Me;
+use crate::{api, passkey, Me};
 
 #[derive(Clone, Debug, PartialEq)]
 enum Stage {
@@ -27,12 +26,45 @@ fn codes_of(body: &Value) -> Option<Stage> {
     Some(Stage::Codes(rows.iter().filter_map(|row| row.as_str().map(str::to_owned)).collect()))
 }
 
+/// What adding a passkey came to.
+enum PasskeyAdded {
+    /// It was the first second factor: the recovery codes are shown once.
+    WithCodes(Stage),
+    Only,
+}
+
+/// Why adding a passkey failed: the server refused, or the browser did.
+enum PasskeyFailed {
+    Server(api::ApiError),
+    Browser(String),
+}
+
+impl PasskeyFailed {
+    fn into_line(self, lang: &str) -> String {
+        match self {
+            PasskeyFailed::Server(failed) => error_line(lang, &failed),
+            PasskeyFailed::Browser(why) => passkey::browser_line(lang, &why),
+        }
+    }
+}
+
+async fn enroll_passkey(csrf: &str) -> Result<PasskeyAdded, PasskeyFailed> {
+    let options = api::send("POST", "/api/mfa/webauthn/begin", csrf, &json!({})).await.map_err(PasskeyFailed::Server)?;
+    let made = passkey::create(&options).await.map_err(PasskeyFailed::Browser)?;
+    let done = api::send("POST", "/api/mfa/webauthn/finish", csrf, &made).await.map_err(PasskeyFailed::Server)?;
+    match codes_of(&done) {
+        Some(next) => Ok(PasskeyAdded::WithCodes(next)),
+        None => Ok(PasskeyAdded::Only),
+    }
+}
+
 #[component]
 pub fn Security(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element {
     let mut stage = use_signal(|| Stage::Idle);
     let mut code = use_signal(String::new);
     let mut busy = use_signal(|| false);
     let mut error = use_signal(String::new);
+    let mut notice = use_signal(String::new);
     let l = lang();
 
     let csrf = user.csrf.clone();
@@ -79,6 +111,29 @@ pub fn Security(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Eleme
         });
     };
 
+    let csrf = user.csrf.clone();
+    let add_passkey = move |_| {
+        if busy() {
+            return;
+        }
+        busy.set(true);
+        error.set(String::new());
+        notice.set(String::new());
+        let csrf = csrf.clone();
+        spawn_local(async move {
+            match enroll_passkey(&csrf).await {
+                Ok(PasskeyAdded::WithCodes(next)) => stage.set(next),
+                Ok(PasskeyAdded::Only) => {
+                    notice.set(t(&lang(), "mfa_passkey_added"));
+                    let next = me.read().clone().map(|m| Me { mfa: true, ..m });
+                    me.set(next);
+                }
+                Err(failed) => error.set(failed.into_line(&lang())),
+            }
+            busy.set(false);
+        });
+    };
+
     let saved = {
         let user = user.clone();
         move |_| {
@@ -91,6 +146,7 @@ pub fn Security(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Eleme
         section { class: "security",
             h2 { "{t(&l, \"security\")}" }
             p { class: "notice notice-danger", role: "alert", hidden: error.read().is_empty(), "{error}" }
+            p { class: "notice", id: "mfa-notice", role: "status", hidden: notice.read().is_empty(), "{notice}" }
             match stage() {
                 Stage::Idle => rsx! {
                     if user.mfa {
@@ -99,6 +155,8 @@ pub fn Security(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Eleme
                         p { id: "mfa-state", "{t(&l, \"mfa_off\")}" }
                         button { class: "primary", id: "mfa-begin", r#type: "button", disabled: busy(), onclick: begin, "{t(&l, \"mfa_begin\")}" }
                     }
+                    p { button { class: "quiet", id: "mfa-passkey", r#type: "button", disabled: busy(), onclick: add_passkey, "{t(&l, \"mfa_passkey_add\")}" } }
+                    p { class: "hint", "{t(&l, \"mfa_passkey_note\")}" }
                 },
                 Stage::Pending { secret, uri } => rsx! {
                     p { "{t(&l, \"mfa_secret\")}" }
