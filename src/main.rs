@@ -810,11 +810,51 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        "waf" => match packetdeath::waf::config::parse_waf_args(&args[1..]) {
+            Ok(settings) => run_waf(settings),
+            Err(e) => arg_error(locale, e),
+        },
+        "waf-test" => match packetdeath::waf::testcmd::parse_test_args(&args[1..]) {
+            Ok(parsed) => exit_code_of(packetdeath::waf::testcmd::run(&parsed)),
+            Err(e) => arg_error(locale, e),
+        },
+        "waf-report" => match packetdeath::waf::report::parse_report_args(&args[1..]) {
+            Ok(parsed) => exit_code_of(packetdeath::waf::report::run(&parsed)),
+            Err(e) => arg_error(locale, e),
+        },
         other => {
             eprintln!(
                 "packetdeath: [error] {}",
                 packetdeath::i18n::unknown_command(locale, other)
             );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Report an option that could not be read and fail.
+fn arg_error(locale: packetdeath::i18n::Locale, e: impl std::fmt::Display) -> ExitCode {
+    eprintln!(
+        "packetdeath: [error] {}",
+        packetdeath::i18n::arg_parse_failed(locale, e)
+    );
+    ExitCode::FAILURE
+}
+
+/// A process exit code from the integer a subcommand returned.
+fn exit_code_of(code: i32) -> ExitCode {
+    match u8::try_from(code) {
+        Ok(byte) => ExitCode::from(byte),
+        Err(_) => ExitCode::FAILURE,
+    }
+}
+
+/// `packetdeath waf` (`docs/design.md` "段階11 WAF"): runs until the process ends.
+fn run_waf(settings: packetdeath::waf::config::Settings) -> ExitCode {
+    match packetdeath::waf::server::run(settings) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("packetdeath: [error] waf: {e}");
             ExitCode::FAILURE
         }
     }

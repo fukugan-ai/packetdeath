@@ -589,6 +589,9 @@ packetdeath は pktmon を起動しません(止め忘れの事故を避ける�
 | `service-run` | サービスの本体。サービスの管理画面(SCM)が起動する物で、利用者は打たない | Windows だけ |
 | `proxy` | 中継役として通信を受け、一覧に載った宛先を断つ | どちらも。ただし通信の中身の検査と能動防御は Linux だけ |
 | `defense-report` | 見張りの記録を数え、止める側へ移してよいかを示す | Linux だけ |
+| `waf` | web アプリケーションファイアウォール。自分の web サーバーの手前に置く中継役で、サーバーに届く前に全部の request を判定する | どちらも |
+| `waf-test` | 見本の request の file を、ネットワークを使わずに同じ判定器へ通し、期待と違う判定になった行を並べる | どちらも |
+| `waf-report` | WAF の記録を数える。処置の件数、当たった rule、多い送信元、誤検知に見える rule を出す | どちらも |
 
 記録の置き場 `--log-dir` を渡さないと、Linux は `$XDG_STATE_HOME/packetdeath`(無ければ `$HOME/.local/state/packetdeath`)、Windows は `%LOCALAPPDATA%\packetdeath` になります。
 `service-install` と `service-run` だけは、サービスが SYSTEM 権限で動いて `%LOCALAPPDATA%` が変わるため、`--log-dir` が必須です。
@@ -760,6 +763,60 @@ Windows でも動きます。
 ./target/release/packetdeath defense-report --flows ./log/flows.jsonl --blocklist blocklist.txt
 ./target/release/packetdeath defense-report --watch ./log/watch.jsonl --days 7
 ```
+
+### waf：web サーバーを守る
+
+`waf` は自分の web サーバー(上流)の手前に立ち、request が上流に届く前に判定します。
+request が引っかかった rule ごとに点を足し(critical は 5、error は 4、warning は 3、notice は 2)、合計が `--threshold` に届くと攻撃として扱います。
+TLS は終わらせません。TLS を終わらせる物(nginx、caddy、クラウドの前段)の後ろに置き、公開する意図が無いなら `--listen` は `127.0.0.1` のままにします。
+既定の mode は `detect` です。何も断らず、全部を `waf.jsonl` に書きます。
+しばらく `waf-report` を読み、誤検知は `--exclusions` で救ってから `block` に上げます。
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--listen` | `<addr:port>` | 接続を受ける場所 | なし | 必須 |
+| `--upstream` | `<host:port>` | WAF の後ろにある web サーバー | なし | 必須 |
+| `--log-dir` | `<path>` | `waf.jsonl` を置く folder。1 request に 1 行で、query の値、header の値、cookie、本文は書かない | なし | 必須 |
+| `--mode` | `off`、`detect`、`block` | `off` は判定せずに通し、`detect` は判定して記録し、`block` はさらに 403 を返す | `detect` | 任意 |
+| `--paranoia` | 1 から 4 | 上げるほど有効な rule が増え、見逃しが減る代わりに誤検知が増える | 1 | 任意 |
+| `--threshold` | 数 | 攻撃として扱う点の合計 | 5 | 任意 |
+| `--max-body` | byte 数 | 受け付ける本文の最大(超えると 413) | 10485760 | 任意 |
+| `--max-body-inspect` | byte 数 | 本文のうち判定する長さ。残りは読まずに通し、`body_truncated` を記録する | 131072 | 任意 |
+| `--max-conns` | 数 | 同時に受ける接続の最大(超えると 503) | 512 | 任意 |
+| `--max-tracked-ips` | 数 | 回数の制限と ban のために覚える address の最大。古い物から消える | 65536 | 任意 |
+| `--rate` | `<回数>/<秒>` | 送信元 address ごとの上限(超えると `Retry-After` 付きの 429) | なし | 任意 |
+| `--ban-after` | 数 | 1 分のうちに何回断ったら ban にするか。0 なら ban しない | 0 | 任意 |
+| `--ban-ttl` | 秒 | ban の長さ | 600 | 任意 |
+| `--rules` | `<path>` | 自分の rule。1 行に JSON を 1 つ(`id`、`target`、`pattern`、`severity`、`paranoia`、`message`)。内蔵の rule と同じ `id` なら置き換える | なし | 任意 |
+| `--exclusions` | `<path>` | 1 行に JSON を 1 つ(`rule`、`path_prefix`、任意で `target` と `method`)。ある場所でだけ、その rule を切る | なし | 任意 |
+| `--allow-ip` | `<path>` | 判定も回数の制限も通さずに上流へ渡す送信元(address と CIDR の一覧) | なし | 任意 |
+| `--deny-ip` | `<path>` | いつでも 403 にする送信元 | なし | 任意 |
+| `--trust-forwarded-from` | `<path>` | `X-Forwarded-For` を信じる前段。使う address は、右から数えて最初の、信頼されていない物 | なし | 任意 |
+
+rule、除外、3 つの address の file は、動いている間に書き換えると読み直されます。
+後から読めなくなった file は、前の内容を使い続けます。
+起動のときに読めなかった file が command line に在れば、起動を止めます。
+
+### waf-test：自分の rule を見本の request で確かめる
+
+見本の 1 行は JSON の 1 つです。`method`、`path`、任意で `query`、`headers`(object)、`body`、そして `expect`(`pass` か `block`)を書きます。
+`expect` と違う判定になった行を `file:行番号` で出し、1 行でもあれば終了 code 1 で終わります。
+この project 自身の試験に使う見本は `tests/waf/` に在ります。
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--corpus` | `<path>` | 見本の request の file | なし | 必須 |
+| `--rules` | `<path>` | 自分の rule。`waf` と同じ | なし | 任意 |
+| `--exclusions` | `<path>` | 除外。`waf` と同じ | なし | 任意 |
+| `--paranoia` | 1 から 4 | `waf` と同じ | 1 | 任意 |
+| `--threshold` | 数 | `waf` と同じ | 5 | 任意 |
+
+### waf-report：記録を読む
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--log-dir` | `<path>` | `waf.jsonl` を置いた folder | なし | 必須 |
+| `--since` | `YYYY-MM-DD` | この日より前の行を除く | なし | 任意 |
 
 ## 詳細な動作
 

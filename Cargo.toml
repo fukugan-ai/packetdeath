@@ -13,6 +13,10 @@ time = { version = "0.3", features = ["formatting"] }
 # IPv4/IPv6 + TCP ヘッダの切り出し。2026-07 も更新が続く純 Rust 実装で、
 # 生 byte を信じない安全な bounds-checked slicing API を持つ
 etherparse = "0.21"
+# Stage 11 (WAF). Finite-automaton matching, so a rule written by a user cannot
+# make a request take exponential time. MIT OR Apache-2.0, no unsafe in this
+# crate's own use of it.
+regex = "1.13"
 
 # nfqueue は Linux 専有の資源なので Linux target だけへ依存を絞る。
 # Windows cross build（PK-5）で不要な crate を巻き込まないため。

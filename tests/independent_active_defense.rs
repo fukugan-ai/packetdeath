@@ -578,11 +578,12 @@ fn without_stage10_options_no_watch_log_is_written() -> TestResult {
     assert_eq!(connect_status(watching.addr, "localhost", silent)?, 200);
     assert!(watching.dir.join("watch.jsonl").exists());
 
-    // The Cargo.lock holds the same number of packages as before stage 10.
+    // The Cargo.lock holds the packages stage 10 left (88) and the four that
+    // the `regex` crate brings for the WAF (`docs/design.md` "段階11 WAF").
     let lock = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock"))?;
     assert_eq!(
         lock.lines().filter(|l| l.starts_with("name = ")).count(),
-        88
+        88 + 4
     );
     Ok(())
 }

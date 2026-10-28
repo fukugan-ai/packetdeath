@@ -25,6 +25,7 @@ pub mod proxy;
 pub mod reassemble;
 pub mod reload;
 pub mod sni;
+pub mod waf;
 
 #[cfg(target_os = "linux")]
 pub mod linux;

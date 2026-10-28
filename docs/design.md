@@ -1989,3 +1989,190 @@ Suricata の側（SSLBL の `sslblacklist_tls_cert.rules` と `ja3_fingerprints.
 1. 毎朝 `~/pd/log/watch.jsonl` の行数と、proxy の journal の `breaker` の行を数える。
 2. 見張りの source が 7 日たったら `defense-report --watch` を打ち、`promote=yes` の source を止める側へ移すかを決める。
 3. 利用者が abuse.ch の key の file を置いたら、feed を 1 回 打ち、ThreatFox と URLhaus の取得が戻ることを確かめる。
+
+## 段階11 WAF（`packetdeath waf`）
+
+WAF は、利用者が持つ web サーバー（上流）の前に置く reverse proxy として動く。
+段階7〜10 の proxy は利用者の端末を守る側（outbound）で、WAF は上流を守る側（inbound）である。向きが逆なので、`proxy` とは別の subcommand にする。
+復号は要らない。TLS の終端は WAF の前段（利用者の既存の終端）に任せ、WAF は平文の HTTP/1.1 だけを扱う。TLS を WAF が終端することは採らない（下の「採らない手段」）。
+
+### 作る物
+
+| 構成 | 内容 |
+|---|---|
+| 入口 | `packetdeath waf --listen <addr:port> --upstream <host:port> --log-dir <dir>`。接続ごとの thread（`tokio` は足さない）。1 接続で複数 request を扱う（keep-alive） |
+| 検査の対象 | request 行（method、path、query）、header（Host、User-Agent、Content-Type、Content-Length、Transfer-Encoding、Cookie、Referer、X-Forwarded-For ほか全部）、本文（`--max-body-inspect`。既定 131072 byte）。本文は urlencoded、JSON（葉の値と key を平らに展開）、multipart（field 名、値、filename）、それ以外は生の byte 列として見る。上限を超えた先は検査せずに上流へ流し、audit に `body_truncated` を出す |
+| 正規化 | percent 復号を最大 3 回（3 回を超えて復号が続くことは、それ自体が rule 920 番台の当たり）。`+` を空白に。NUL の除去（NUL を見たことは 920 番台の当たり）。小文字化。SQL の `/* */` 注釈の除去。連続する空白と制御文字を 1 つの空白に。path は `//`、`/./`、`/../`、`\` を畳む。UTF-8 として不正な byte 列は lossy に直し、直したことを 920 番台の当たりにする |
+| rule | 内蔵の rule 集（下の表）と、`--rules <path>`（JSON Lines。1 行 1 rule）。rule は `id`、`target`、`pattern`（regex。`regex` crate で、線形時間なので ReDoS を起こさない）、`severity`、`paranoia`、`message`、`tags` を持つ。内蔵の rule と同じ `id` を外部が持てば、外部が置き換える |
+| 判定 | anomaly scoring。当たった rule の severity（critical=5、error=4、warning=3、notice=2）を足し、合計が `--threshold`（既定 5）以上なら block。paranoia level（`--paranoia 1..4`、既定 1）より高い level の rule は評価しない。単体で critical の rule は、それ 1 つで既定の閾値に届く |
+| mode | `--mode off|detect|block`。既定は `detect`（通して audit だけ書く）。`block` で 403 を返す。mode は rule 単位に上書きできない（混ぜると audit の意味が割れる） |
+| 除外 | `--exclusions <path>`（JSON Lines）。`{"rule":942100,"path_prefix":"/api/search","target":"query"}` のように、rule の id と path の前置き（任意で target と method）に当たったときだけ、その rule を評価しない。誤検知を救う唯一の口 |
+| source IP の制御 | `--allow-ip <path>`（CIDR の list。当たった source は検査も rate limit も通さずに上流へ）、`--deny-ip <path>`（当たった source は 403）。`--rate <N>/<秒>` で source IP ごとの token bucket（超えたら 429 と `Retry-After`）。`--ban-after <N>` と `--ban-ttl <秒>`：block が窓の間に N 回続いた source は ttl の間、検査せずに 403（上限つきの表。溢れたら古い物から消す） |
+| source IP の決め方 | 既定は socket の相手の IP。`--trust-forwarded-from <CIDR の list>` に当たる相手のときだけ、`X-Forwarded-For` の右から数えて最初の信頼されない IP を使う |
+| 上流 | 接続の timeout 3 秒、応答の無通信 timeout 60 秒。上流に繋がらなければ 502、応答が来なければ 504。上流への request には `X-Request-Id` を足し、`X-Forwarded-For` の末尾に相手の IP を付ける。hop-by-hop header は付け替える |
+| 資源の上限 | 同時接続数（`--max-conns`、既定 512。超えたら 503 を返して閉じる）、head の大きさ（16 KiB。超えたら 431）、header の数（100）、本文の大きさ（`--max-body`、既定 10 MiB。超えたら 413）、request 行の timeout（10 秒。超えたら 408 を返して閉じる）、本文の無通信 timeout（30 秒） |
+| 読み直し | `--rules`、`--exclusions`、`--allow-ip`、`--deny-ip` は走行中に書き換えられる。既存の `ReloadWatcher`（300 ms ごとの指紋）で読み直し、読めなかった file は前の内容を使い続けて `[warn]` を 1 回出す。不正な行は捨てて件数を `[warn]` に出す |
+| audit | `<log-dir>/waf.jsonl`。1 request 1 行。field は `ts`、`id`（request の識別子）、`ip`、`host`、`method`、`path`（256 byte で切る。query は載せない）、`query_len`、`body_len`、`status`、`action`（`pass` `detect` `block` `deny-ip` `ratelimit` `ban` `protocol`）、`score`、`rules`（当たった rule の id と target の列）、`mode`、`upstream_ms`、`flags`（`body_truncated` など）。query の値、header の値、cookie、本文は書かない |
+| 報告 | `packetdeath waf-report --log-dir <dir> [--since <日付>]`：action ごとの件数、当たった rule の上位、source IP の上位、block の割合、誤検知の疑い（同じ rule が同じ path で続けて当たる）を出す |
+| 検査用 | `packetdeath waf-test --rules ... --corpus <path>`：JSON Lines の corpus（`{"method","path","query","headers","body","expect":"pass|block"}`）を、socket を使わずに判定器へ通し、期待と違う行を file:line で出して rc=1。受入と、利用者が自分の rule を直したときの回帰に使う |
+
+### 内蔵の rule 集
+
+CRS（OWASP Core Rule Set）の分類にならって番号を切る。rule の文言は CRS から写さず、公開の攻撃手口（`記憶`）から自作する。
+
+| 番号帯 | 分類 | 当てる物（例） |
+|---|---|---|
+| 913 | scanner | User-Agent が sqlmap、nikto、nmap、masscan、acunetix、nessus、wpscan、dirbuster、gobuster、zgrab を名乗る |
+| 920 | protocol | `Content-Length` と `Transfer-Encoding` の同居、`Content-Length` の複数、header 値の CR/LF、不正な method、Host の欠落、NUL、復号が 3 回を超える、不正な UTF-8 |
+| 930 | path traversal / LFI | 復号後の `../`、`..\`、`/etc/passwd`、`/proc/self`、`win.ini`、`boot.ini`、`web.config`、`.git/`、`.env`、`.htaccess` |
+| 931 | RFI / SSRF | `file://`、`gopher://`、`dict://`、`ftp://` の URL を値に持つ、`169.254.169.254`、`metadata.google.internal`、`localhost` や private IP を値に持つ URL の引数 |
+| 932 | command injection | `;` `|` `&&` `` ` `` `$(` の直後の既知の command（`cat` `wget` `curl` `nc` `bash` `sh` `powershell` `whoami` `id`）、`/bin/sh`、`cmd.exe /c`、`-enc` つきの powershell |
+| 933 | PHP / 言語の injection | `<?php`、`php://`、`data://`、`phar://`、`eval(`、`base64_decode(`、`system(` の関数呼び出し |
+| 934 | その他の injection | `${jndi:`（Log4Shell。`${` の入れ子による迂回も）、`class.module.classLoader`（Spring4Shell）、`{{` `}}` と `#{` の template injection、`%{(#` の OGNL、XXE（`<!ENTITY`、`SYSTEM "file:`） |
+| 941 | XSS | `<script`、`javascript:`、`vbscript:`、`on\w+\s*=`、`<svg`、`<iframe`、`<img ... onerror`、`srcdoc=`、`data:text/html` |
+| 942 | SQL injection | `union select`、`' or 1=1`、`or 'a'='a`、`sleep(`、`benchmark(`、`pg_sleep`、`waitfor delay`、`information_schema`、`;--`、`load_file(`、`into outfile`、`xp_cmdshell`、`extractvalue(`、`updatexml(` |
+| 943 | session / 認証 | session id の固定の試み（`;jsessionid=` を path に持つ）、`Authorization` の異常な長さ |
+| 944 | 業務の誤用 | upload の filename が実行 file の拡張子（`.php` `.phtml` `.jsp` `.asp` `.aspx` `.sh` `.exe`）で終わる、二重拡張子、`filename` に path 区切り |
+
+severity の割り当て：確かな攻撃の手口（Log4Shell、`union select`、`<script`、`/etc/passwd`、NUL）は critical。曖昧な手口（`or 1=1` に似た短い式、単独の `on\w+=`）は warning で、paranoia 2 以上に置く。scanner の UA は warning（単独では block しない）。
+
+### 採らない手段
+
+| 採らない | 理由 |
+|---|---|
+| WAF が TLS を終端する | 証明書の更新と秘密鍵の保管が WAF の仕事に増える。利用者の既存の終端（nginx、caddy、Cloudflare）の後ろに置けば足りる。WAF を TLS の外に出すと平文が LAN を流れるので、`--listen` は既定で `127.0.0.1` に限り、他の address は `--listen` の明示を要する |
+| 応答の本文の検査 | 応答は streaming で返しており、検査してから止めることはできない。漏洩の検知は別の道具（log の監視）の仕事 |
+| OWASP CRS の rule 文言の転記 | CRS は Apache-2.0 だが、版の追従を人が回す形になる。分類だけ倣い、rule は自作して `waf-test` の corpus で守る |
+| 機械学習による判定 | 説明できない block を作る。誤検知を除外の口で救えなくなる |
+| rule の動的 load（plugin） | `unsafe_code = "forbid"` と、判定器は compile 時に列挙する規則（「判定を差し込む口」）に反する。外部から足せるのは JSON Lines の rule だけ |
+| 検査を通らない迂回の口（header で WAF を切る） | 攻撃者が切れる口になる |
+
+### 壊れ方と、先に潰す物
+
+| 壊れ方 | 防ぐ物 |
+|---|---|
+| rule の誤検知で正常な request が 403 になる | 既定は `detect`。`block` へ上げる前に、`waf-report` の誤検知の疑いと、利用者自身の通信を `waf-test` の corpus にして 0 件を確かめる。除外の口で救う |
+| engine の panic で全 request が落ちる | 接続の thread は `catch_unwind` で囲み、検査の panic は `pass` に倒して `[error]` を出す（fail-open）。ただし `block` mode でも、検査が答えを出せなかった request を通すことは audit の `flags` に `engine_error` を残す |
+| 巨大な本文、遅い送信（slowloris）、大量の接続で資源が尽きる | 上の「資源の上限」。本文の検査は上限までしか memory に持たない |
+| request smuggling | `Content-Length` と `Transfer-Encoding` の同居、`Content-Length` の複数、`Transfer-Encoding` の不正な値は 400 で閉じ、上流へ渡さない。上流へ渡す request は WAF が組み直す（header は WAF が解釈した物だけを書く） |
+| X-Forwarded-For の偽装で rate limit と ban を迂回される | 既定は socket の相手を使う。信頼する前段だけ `--trust-forwarded-from` に書く |
+| 表が膨らむ（rate、ban、接続） | すべて上限つきで、溢れたら古い物から消す。上限は `--max-tracked-ips`（既定 65536） |
+| 上流が落ちる | 502/504 を返し、audit に `upstream_ms` と `flags` を残す。WAF 自身は落ちない |
+| WAF が落ちて前段が上流に届かない | WAF は単一の障害点になる。前段の設定に WAF が落ちたときの上流への直通の経路を残す（利用者の運用。この設計の範囲外）。unit は `Restart=always` |
+
+### 受入 ID
+
+| ID | 受入条件 | 打つ command | 通ったと判る出力 |
+|---|---|---|---|
+| **PK-150** | **陰性対照**。`detect` mode は攻撃を通し、audit に残す | 上流に `127.0.0.1:<p>` の小さな HTTP server を置き、`packetdeath waf --listen 127.0.0.1:<w> --upstream 127.0.0.1:<p> --mode detect --log-dir <d> &` の後に `curl -sS -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:<w>/?q=1%27%20union%20select%20password%20from%20users--"; tail -1 <d>/waf.jsonl` | `200`。log が `"action":"detect"` と 942 番台の rule |
+| **PK-151** | `block` mode は同じ request を 403 にし、上流に届かない | PK-150 の起動を `--mode block` に替え、同じ curl の後に上流の受信数を数える | `403`、上流の受信 0、log が `"action":"block"` |
+| **PK-152** | 攻撃の corpus（各分類 5 件以上、合計 60 件以上）が全部 block、正常の corpus（API、form、JSON、multipart、日本語を含む本文、長い query、記号を含む検索語、合計 100 件以上）が全部 pass | `packetdeath waf-test --corpus tests/waf/attacks.jsonl; echo rc=$?` と `... tests/waf/benign.jsonl` | 両方 `rc=0`、期待と違う行 0 |
+| **PK-153** | 迂回に耐える：二重 percent 符号化、大文字小文字の混在、SQL 注釈の挿入、NUL、`+` と空白、末尾の改行 | `tests/waf/evasions.jsonl` を PK-152 と同じ command で | `rc=0` |
+| **PK-154** | 本文の検査：urlencoded、JSON（入れ子）、multipart の field と filename で攻撃を見つけ、上限を超えた先は流して `body_truncated` を出す | `tests/waf/bodies.jsonl`（`--max-body-inspect 1024` で、上限の手前に攻撃がある行と、上限の先にある行を含む） | 手前は block、先は pass と `body_truncated` |
+| **PK-155** | protocol：`Content-Length` と `Transfer-Encoding` の同居、`Content-Length` の複数、header の CR/LF、head が 16 KiB 超（431）、本文が `--max-body` 超（413）、request 行の無送信（408） | `tests/independent_waf.rs` の socket test | 期待の status。上流の受信 0 |
+| **PK-156** | rate limit：`--rate 5/1` で 6 件目が 429 と `Retry-After`、1 秒後に回復。`--ban-after 3` で 3 回 block した source が `ban` になり、`--ban-ttl` の後に戻る | `tests/independent_waf.rs` | 期待の status と audit の action |
+| **PK-157** | `--allow-ip` の source は攻撃の request も通る。`--deny-ip` の source は正常な request も 403 | 同上 | `200`、`403` |
+| **PK-158** | 走行中に `--rules` と `--exclusions` を書き換えると 1 秒以内に判定が変わる。壊れた file は前の内容が残り `[warn]` が 1 回 | 同上 | 書き換え前後で status が変わる。壊れた file の後も前の判定 |
+| **PK-159** | fail-open：上流が止まっていれば 502、engine の panic（test 用の注入）は `pass` で `engine_error` が残る。WAF は落ちない | 同上 | `502`。`200` と `engine_error` |
+| **PK-160** | audit の形：1 request 1 行、`id` が一意、query の値と header の値と cookie と本文が log に出ない | 攻撃を含む 200 件を流し、`jq` で field と一意性を数え、秘密の印字（`SECRETVALUE`）を query と cookie と本文に入れた request の後に `grep -c SECRETVALUE <d>/waf.jsonl` | 200 行、`id` の重複 0、`grep -c` が 0 |
+| **PK-161** | 性能：WAF を経由して足される遅延の p99 が 5 ms 未満（1 KiB の request、loopback、並列 16、10000 request）。memory が一定（10000 request の前後で VmRSS の差が 8 MiB 未満） | `tests/waf/bench.sh`（release binary。curl を使わず、WAF 経由と直通を同じ client で測って差を取る） | 差の p99 < 5 ms。VmRSS の差 < 8 MiB |
+| **PK-162** | 資源：`--max-conns 4` で 5 本目が 503。slowloris（head を 1 byte ずつ送る）が 10 秒で切られる | `tests/independent_waf.rs` | `503`、切断 |
+| **PK-163** | `waf-report` が action の件数、rule の上位、source の上位、block の割合を出す。誤検知の疑いを 1 件以上 出す fixture がある | `packetdeath waf-report --log-dir tests/waf/fixture-log` | 期待の行 |
+| **PK-164** | 反映：本番に `detect` mode の canary を、害の無い上流（既存の local の HTTP server）の前に置き、攻撃の request が audit に残り、`touch ~/pd/waf-off` 相当の 1 操作（unit を止める）で戻せる | 本番の手順（`blocklists/README.md` の運用チェックリストに足す） | audit に `detect` の行。止めた後に port が閉じる |
+
+### 受入 ID と test の対応
+
+| ID | test（file::名前の前置き） | 打つ command |
+|---|---|---|
+| PK-150、151 | `tests/independent_waf.rs::pk150_*`、`pk151_*` | `cargo test --test independent_waf` |
+| PK-152、153 | `tests/waf_corpus.rs::pk152_*`、`pk153_*`（corpus は `tests/waf/attacks.jsonl`、`benign.jsonl`、`evasions.jsonl`） | `cargo test --test waf_corpus` |
+| PK-154 | `tests/independent_waf_more.rs::pk154_*`、`tests/waf_corpus.rs::pk154_*`（`tests/waf/bodies.jsonl`） | `cargo test --test independent_waf_more --test waf_corpus` |
+| PK-155、156、157 | `tests/independent_waf.rs::pk155_*`、`pk156_*`、`pk157_*` | `cargo test --test independent_waf` |
+| PK-158、159、160、162 | `tests/independent_waf_more.rs::pk158_*`、`pk159_*`、`pk160_*`、`pk162_*` | `cargo test --test independent_waf_more` |
+| PK-161 | `tests/waf_bench.rs::pk161_*`（`#[ignore]`。release で打つ） | `cargo test --release --test waf_bench -- --ignored --nocapture` |
+| PK-163 | `tests/independent_waf_cli.rs::pk163_*`（fixture は `tests/waf/fixture-log/waf.jsonl`） | `cargo test --test independent_waf_cli` |
+| PK-164 | 本番の手順（`blocklists/README.md` の運用チェックリスト） | 手順書のとおり |
+
+実装の構成は `src/waf/` の 15 module：`http`（枠の読み書き）、`normalize`（値の正規化）、`rules`（rule と内蔵 44 本）、`engine`（判定）、`limits`（回数の制限、ban、信頼する前段）、`gate`（送信元の判定）、`audit`（`waf.jsonl`）、`config`（option と除外）、`live`（読み直し）、`forward`（上流への転送）、`request`、`carry`、`server`、`testcmd`（`waf-test`）、`report`（`waf-report`）。
+
+accept は blocking で待つ。待ち時間を sleep で刻むと、新しい接続ごとに平均で刻みの半分が足される（20 ms の刻みで p50 が約 20 ms 増えた）。
+
+## 段階12 IDS/IPS の業務水準化
+
+段階4 の IPS は、Suricata の alert を `--ips-sids` と `--ips-severity` で選び、宛先を TTL つきで落とす。次の穴が、運用に出す前に残っている。
+
+| 穴 | 起きること | 実読の出所 |
+|---|---|---|
+| `eve.json` の追記分を `read_to_end` で全部読む | 巨大な追記（Suricata の再起動後の洪水）で memory が尽きる | `src/ids.rs` の `poll_eve_file_once` |
+| rotation の検知が「file が縮んだら先頭から」だけ | rotate 後の新 file が前の offset より大きいと、先頭の分を読み飛ばす。copytruncate 以外の rotate（rename して新規作成）を検知できない | 同上 |
+| drop 集合に上限が無い | alert の洪水で entry が際限なく増える | `IdsDropSet` |
+| 宛先を落とす対象に安全網が無い | LAN の gateway、DNS resolver、proxy 自身、loopback に当たる alert が、通信の基盤を落とす | `IdsDropSet::insert` に宛先の検査が無い |
+| 判定が「sid か severity」の 2 つだけ | classtype 別、sid ごとの TTL、観測だけ（落とさず記録）が選べない。誤検知の sid を抑える口が無い（`--ips-sids` に入れない以外） | `IpsRule` |
+| 1 件の alert で即 drop | 低 severity の alert が積み重なる脅威（スキャン、ブルートフォース）を段階的に扱えない | 同上 |
+| 再起動で drop 集合が消える | 再起動の度に、落としていた宛先が一斉に通る | `IdsDropSet`（memory のみ） |
+| Suricata が止まっても気づかない | `eve.json` が増えないまま、IPS が動いていると誤解する | `watch_eve_file` に健全性の検査が無い |
+| 何を落としたかの記録が `[debug]` の標準エラーだけ | 後から追えない。誤遮断の調査ができない | `eprintln!` |
+| 運用の報告が無い | 効いている sid、誤検知の疑いが見えない | `defense-report` に相当する物が無い |
+
+### 作る物
+
+1. **policy file**（`--ips-policy <path>`、JSON Lines。`--ips-sids` と `--ips-severity` は残し、policy が無いときの挙動を変えない）。1 行 1 規則で、順に評価して最初に当たった規則の action を使う。
+   - 条件：`sid`（数または範囲）、`classtype`、`severity_max`、`category` の部分一致、`src`（CIDR）、`dst`（CIDR）、`proto`、`dst_port`
+   - action：`drop`（`ttl` 秒。省略は `--ips-ttl`）、`alert`（落とさず audit に `observed` で残す）、`ignore`（audit にも残さない。誤検知の抑制）、`escalate`（閾値つき。下）
+   - 末尾に当たる規則が無い alert は、既定の action（`--ips-default drop|alert|ignore`。既定 `alert`。`--ips-sids` と `--ips-severity` を併用しているときは従来の判定が先に効く）
+2. **段階的な escalate**：`{"action":"escalate","count":5,"window":60,"ttl":900}` は、同じ（src、dst、sid）の組の alert が window の間に count 回に届いたら、その宛先を ttl で落とす。届くまでは `observed`。表は上限つき。
+3. **never-block（安全網）**：`--ips-never <path>`（CIDR の list）と、既定の保護（loopback、link-local、multicast、broadcast、`0.0.0.0`、この host の全 address、既定の gateway と `/etc/resolv.conf` の resolver）。当たった宛先は policy が `drop` でも落とさず、audit に `protected` で残す。既定の保護を外すには `--ips-allow-private` を明示する（LAN の端末が攻撃元のとき、LAN の宛先を落としたい運用のため）。
+4. **drop 集合**：上限（`--ips-max-entries`、既定 16384。溢れたら期限の近い物から消す）。`--ips-state <path>` を渡せば、挿入と期限切れで atomic に書き出し（tmp と rename）、起動時に読む（期限切れは捨てる）。読めなければ空で始めて `[warn]`。
+5. **`eve.json` の読み方**：1 poll で読む上限（`--eve-max-read`、既定 8 MiB）。超えた分は次の poll へ。1 行の上限（1 MiB）を超えた行は捨てて件数を数える。file の同一性は inode と先頭 byte の指紋で見て、rename 型の rotate も検知し、新しい file を先頭から読む。縮んだ場合（copytruncate）も先頭から。不正な UTF-8 の行は lossy にせず捨てる。
+6. **健全性**：`--eve-stale <秒>`（既定 900）の間、`eve.json` が増えず mtime も動かなければ `[warn]` を 1 回（回復で `[info]`）。`eve.json` が無い、読めないときも同じ。
+7. **audit**：`<log-dir>/ips.jsonl`。1 件 1 行。field は `ts`、`event`（`drop` `observed` `ignored` `protected` `escalated` `expired` `evicted` `restored` `stale` `recovered`）、`sid`、`severity`、`classtype`、`dst_ip`、`dst_port`、`src_ip`、`ttl`、`rule`（当たった規則の行番号）。alert の署名文字列と通信の中身は書かない（段階4 の「通信の中身を log へ持ち出さない」）。
+8. **報告**：`packetdeath ips-report --log-dir <dir> [--since <日付>]`：event ごとの件数、効いた sid の上位、`observed` のまま溜まっている sid（落とすかの判断材料）、`protected` に当たった宛先（誤設定の兆候）、drop の件数の日別。
+9. **policy の検査**：`packetdeath ips-test --policy <path> --alerts <eve の alert の JSON Lines> [--expect <path>]`：socket も Suricata も使わず、alert の列を policy に通した action を行ごとに出す。`--expect` と違えば file:line で出して rc=1。
+
+走行中の読み直し：`--ips-policy` と `--ips-never` は `ReloadWatcher` で読み直す。読めなければ前の内容と `[warn]`。不正な行は捨てて件数を出す。
+
+### 採らない手段
+
+| 採らない | 理由 |
+|---|---|
+| Suricata を packetdeath が起動・監督する | 「packetdeath は pktmon も iptables も scanner も起動しない」に反する。健全性は `eve.json` の動きで見る |
+| `eve.json` 以外の event（`flow`、`http`、`tls`）を読む | 通信の中身を log へ持ち出さない制約。`alert` だけを読む（PK-35） |
+| 即時の block を既定にする | 既定は `alert`（観測）。落とすのは policy が言った物だけにする |
+| ET Open の rule の自動更新を packetdeath が持つ | `suricata-update` は Suricata 側の仕事。packetdeath は読むだけ |
+| drop 集合を DB に持つ | 外部の依存を足す。1 file の atomic write で足りる |
+| 再起動の復元で期限を延ばす | 期限は絶対時刻（UTC）で持ち、復元した時点で切れた物は捨てる |
+
+### 壊れ方と、先に潰す物
+
+| 壊れ方 | 防ぐ物 |
+|---|---|
+| policy の書き間違いで LAN の基盤を落とす | never-block の既定の保護。`ips-test` で配備前に alert の fixture を通す |
+| policy が壊れて全 alert が `drop` になる | 読めない行は捨てる。規則が 0 件になった policy は読み直さず前の内容を残す |
+| 洪水で memory と CPU が尽きる | 1 poll の上限、1 行の上限、drop 集合・escalate 表の上限 |
+| 状態 file が壊れて起動できない | 読めなければ空で始める（fail-open）。書き出しは atomic |
+| 状態 file の書き出しが遅く判定を止める | 書き出しは alert を読む thread の中で、挿入の後に行い、判定の経路（`IdsJudge::contains`）には載せない |
+
+### 受入 ID
+
+| ID | 受入条件 | 打つ command | 通ったと判る出力 |
+|---|---|---|---|
+| **PK-170** | **陰性対照**。policy も新しい option も無いとき、PK-30〜37 が従来どおり通る（回帰） | PK-30 から PK-37 を打ち直す。`tests/independent_ids*` の既存 test | 各 ID の「通ったと判る出力」と同じ |
+| **PK-171** | policy の条件と action：sid、sid の範囲、classtype、severity_max、src/dst の CIDR、dst_port に当たる alert が、順序どおり最初の規則で `drop`、`alert`、`ignore` になる | `packetdeath ips-test --policy tests/ids/policy.jsonl --alerts tests/ids/alerts.jsonl --expect tests/ids/expect.jsonl; echo rc=$?` | `rc=0` |
+| **PK-172** | escalate：window の間に count 回で `drop`、届かなければ `observed`。window を過ぎると数え直し | `tests/independent_ids_policy.rs`（時刻を注入） | 期待の action の列 |
+| **PK-173** | never-block：loopback、gateway、resolver、この host の address、`--ips-never` の CIDR は、policy が `drop` でも `protected`。`--ips-allow-private` で private だけが外れ、loopback と host の address は外れない | 同上 | `protected`。外れた後の `drop` |
+| **PK-174** | drop 集合の上限と退避：上限を超えると期限の近い物から消え、`evicted` が残る。memory が上限で止まる | 同上（上限 8、100 件を入れる） | 件数 8 以下、`evicted` 92 |
+| **PK-175** | 状態の復元：書き出し、process の再起動に当たる作り直し、読み込み。期限切れは捨てる。壊れた file は空で始まり `[warn]` | 同上 | 復元した件数が期待どおり。壊れた file で起動する |
+| **PK-176** | `eve.json` の読み方：1 poll の上限、1 MiB 超の行を捨てる、rename 型の rotate、copytruncate、不正な UTF-8 の行、追記の途中で切れた行 | 同上 | 落とす対象が期待どおり。捨てた件数が audit にある |
+| **PK-177** | 健全性：増えない file で `--eve-stale` の後に `stale` が 1 回、増え始めて `recovered`。file が無いときも | 同上（時刻を注入） | `stale` 1、`recovered` 1 |
+| **PK-178** | audit の形：1 件 1 行、署名文字列と通信の中身が出ない | `jq` で field を数え、署名文字列の印字（`SECRETSIGNATURE`）を入れた alert の後に `grep -c SECRETSIGNATURE <d>/ips.jsonl` | field が揃う。`grep -c` が 0 |
+| **PK-179** | 読み直し：`--ips-policy` と `--ips-never` を走行中に書き換えると 1 秒以内に変わる。壊れた file と規則 0 件の file は前の内容が残る | `tests/independent_ids_policy.rs` | 書き換え前後で action が変わる。壊れた後も前の action |
+| **PK-180** | `ips-report`：event の件数、sid の上位、`observed` のままの sid、`protected` の宛先 | `packetdeath ips-report --log-dir tests/ids/fixture-log` | 期待の行 |
+| **PK-181** | 負荷：alert 10 万行（うち 1 行が 1 MiB 超）を `eve.json` に一度に書いても、読み終えるまで RSS の増加が 64 MiB 未満で、判定の経路（`contains`）の p99 が 1 ms 未満 | `tests/ids/flood.sh` | 値が基準内 |
+| **PK-182** | 本番の `packetdeath-block` への反映：policy を `observed` のみ（`drop` なし）で入れ、`ips.jsonl` に行が出る。戻し方は drop-in の削除 1 つ | 本番の手順（`blocklists/README.md` の運用チェックリストに足す） | `ips.jsonl` に `observed` の行。通信に変化なし |
+
+### 段階の表への追加
+
+| 段階 | 何ができたら次へ行くか | 受入 ID |
+|---|---|---|
+| **11. WAF** | `waf` subcommand が上の構成で動き、corpus の検出と誤検知 0 と性能の基準が通る | PK-150〜PK-164 |
+| **12. IDS/IPS の業務水準化** | policy、escalate、never-block、状態の保存、`eve.json` の頑健化、audit、報告が通る | PK-170〜PK-182 |

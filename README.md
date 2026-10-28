@@ -587,6 +587,9 @@ Running `packetdeath` with no arguments prints the usage lines.
 | `service-run` | The body of the service. The service manager (SCM) starts it; users do not type it | Windows only |
 | `proxy` | Acts as a relay and cuts connections to destinations on a list | Both. Content inspection and active defense are Linux only |
 | `defense-report` | Counts the hits in the watch logs and shows whether a list may move to the blocking side | Linux only |
+| `waf` | A web application firewall: a reverse proxy in front of your web server that judges every request before the server sees it | Both |
+| `waf-test` | Runs a file of sample requests through the same judge, without a network, and lists the ones judged differently from what you expected | Both |
+| `waf-report` | Counts the WAF audit log: actions, rules that fired, busiest sources, rules that look like false positives | Both |
 
 If you do not pass `--log-dir`, the log folder is `$XDG_STATE_HOME/packetdeath` (or `$HOME/.local/state/packetdeath` if that is unset) on Linux, and `%LOCALAPPDATA%\packetdeath` on Windows.
 Only `service-install` and `service-run` require `--log-dir`, because the service runs as SYSTEM and `%LOCALAPPDATA%` is different there.
@@ -758,6 +761,60 @@ You must pass exactly one of `--flows` and `--watch` (it fails with both, and wi
 ./target/release/packetdeath defense-report --flows ./log/flows.jsonl --blocklist blocklist.txt
 ./target/release/packetdeath defense-report --watch ./log/watch.jsonl --days 7
 ```
+
+### waf: protect a web server
+
+`waf` stands in front of your own web server (the "upstream") and judges each request before the server sees it.
+Each rule a request trips adds points (critical 5, error 4, warning 3, notice 2), and a total that reaches `--threshold` counts as an attack.
+It does not end TLS. Put it behind whatever does (nginx, caddy, a cloud front), and keep `--listen` on `127.0.0.1` unless you mean to expose it.
+The default mode is `detect`: nothing is refused, and everything is written to `waf.jsonl`.
+Read `waf-report` for a while, rescue false positives with `--exclusions`, and only then move to `block`.
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--listen` | `<addr:port>` | Where to accept connections | None | Required |
+| `--upstream` | `<host:port>` | The web server behind the WAF | None | Required |
+| `--log-dir` | `<path>` | The folder that holds `waf.jsonl`. One line per request; no query values, header values, cookies or bodies | None | Required |
+| `--mode` | `off`, `detect` or `block` | `off` forwards without judging, `detect` judges and logs, `block` also answers 403 | `detect` | Optional |
+| `--paranoia` | 1 to 4 | A higher level turns on more rules: fewer misses, more false positives | 1 | Optional |
+| `--threshold` | number | The total score at which a request counts as an attack | 5 | Optional |
+| `--max-body` | bytes | The largest request body accepted (413 above it) | 10485760 | Optional |
+| `--max-body-inspect` | bytes | How much of a body is judged. The rest is forwarded unread and `body_truncated` is logged | 131072 | Optional |
+| `--max-conns` | number | The most connections served at once (503 above it) | 512 | Optional |
+| `--max-tracked-ips` | number | The most addresses remembered for rate limits and bans. The oldest are dropped first | 65536 | Optional |
+| `--rate` | `<count>/<seconds>` | A limit per source address (429 with `Retry-After` above it) | None | Optional |
+| `--ban-after` | number | How many refusals within a minute earn a ban. 0 means no bans | 0 | Optional |
+| `--ban-ttl` | seconds | How long a ban lasts | 600 | Optional |
+| `--rules` | `<path>` | Your own rules, one JSON object per line (`id`, `target`, `pattern`, `severity`, `paranoia`, `message`). A rule with a built-in's `id` replaces it | None | Optional |
+| `--exclusions` | `<path>` | One JSON object per line (`rule`, `path_prefix`, optionally `target` and `method`) that switches a rule off for one place | None | Optional |
+| `--allow-ip` | `<path>` | Sources forwarded without judging or rate limiting (addresses and CIDR) | None | Optional |
+| `--deny-ip` | `<path>` | Sources that always get 403 | None | Optional |
+| `--trust-forwarded-from` | `<path>` | Fronts whose `X-Forwarded-For` is believed. The address used is the first one from the right that is not itself trusted | None | Optional |
+
+The rules, the exclusions and the three address files are read again while it runs.
+A file that cannot be read later leaves the previous content in use.
+A file named on the command line that cannot be read at start stops the start.
+
+### waf-test: check your rules against sample requests
+
+Each line of the corpus is one JSON object: `method`, `path`, optionally `query`, `headers` (an object) and `body`, and `expect` (`pass` or `block`).
+It prints each line judged differently from `expect` as `file:line`, and exits 1 if there is any.
+The corpora this project is tested with are in `tests/waf/`.
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--corpus` | `<path>` | The file of sample requests | None | Required |
+| `--rules` | `<path>` | Your own rules, as for `waf` | None | Optional |
+| `--exclusions` | `<path>` | Exclusions, as for `waf` | None | Optional |
+| `--paranoia` | 1 to 4 | As for `waf` | 1 | Optional |
+| `--threshold` | number | As for `waf` | 5 | Optional |
+
+### waf-report: read the audit log
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--log-dir` | `<path>` | The folder that holds `waf.jsonl` | None | Required |
+| `--since` | `YYYY-MM-DD` | Leave out lines before this day | None | Optional |
 
 ## Details
 

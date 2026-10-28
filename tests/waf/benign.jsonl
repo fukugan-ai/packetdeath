@@ -1,0 +1,104 @@
+# Benign corpus (PK-152): every line must stay under the default threshold at paranoia 1.
+# Ordinary traffic: pages, search, forms, JSON APIs, uploads, Japanese text, odd but harmless values.
+{"method":"GET","path":"/","expect":"pass"}
+{"method":"GET","path":"/index.html","expect":"pass"}
+{"method":"GET","path":"/shop/items","query":"q=blue+shoes&page=2","expect":"pass"}
+{"method":"GET","path":"/shop/items","query":"q=red+dress&sort=price_asc&page=10","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=select+an+option+from+the+list","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=how+to+drop+a+class+in+python","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=union+station+tokyo","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=o'brien+pub","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=rock+'n'+roll","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=cats+%26+dogs","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=fish;+chips","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=a+-+b+--+c","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=1+%2B+1+%3D+2","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=what+is+the+system+(in+biology)","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=%E6%97%A5%E6%9C%AC%E8%AA%9E%E3%81%AE%E6%A4%9C%E7%B4%A2%E8%AA%9E","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=東京の天気","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=café+münchen+naïve","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=2+%3C+3+and+5+%3E+4","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=100%25+cotton","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=email%40example.com","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=https%3A%2F%2Fexample.com%2Fpath%3Fa%3D1","expect":"pass"}
+{"method":"GET","path":"/redirect","query":"to=https://example.org/home","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=c%2B%2B+tutorial","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=price%3A+%24100-%24200","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=the+quick+brown+fox+jumps+over+the+lazy+dog+the+quick+brown+fox+jumps+over+the+lazy+dog","expect":"pass"}
+{"method":"GET","path":"/products/12345","expect":"pass"}
+{"method":"GET","path":"/products/12345/reviews","query":"page=3&per_page=50","expect":"pass"}
+{"method":"GET","path":"/blog/2026/10/how-to-write-a-union-type","expect":"pass"}
+{"method":"GET","path":"/docs/sql/select-statement","expect":"pass"}
+{"method":"GET","path":"/static/js/app.min.js","query":"v=20261028","expect":"pass"}
+{"method":"GET","path":"/static/css/site.css","expect":"pass"}
+{"method":"GET","path":"/images/logo.png","expect":"pass"}
+{"method":"GET","path":"/favicon.ico","expect":"pass"}
+{"method":"GET","path":"/robots.txt","expect":"pass"}
+{"method":"GET","path":"/sitemap.xml","expect":"pass"}
+{"method":"GET","path":"/api/v1/users","query":"limit=20&offset=40","expect":"pass"}
+{"method":"GET","path":"/api/v1/users/42","expect":"pass"}
+{"method":"GET","path":"/api/v1/orders","query":"status=open&from=2026-01-01&to=2026-10-28","expect":"pass"}
+{"method":"GET","path":"/api/v1/items","query":"ids=1,2,3,4,5","expect":"pass"}
+{"method":"GET","path":"/api/v1/items","query":"filter[name]=shirt&filter[size]=m","expect":"pass"}
+{"method":"GET","path":"/api/v1/items","query":"sort=-created_at","expect":"pass"}
+{"method":"GET","path":"/health","expect":"pass"}
+{"method":"GET","path":"/metrics","expect":"pass"}
+{"method":"GET","path":"/login","expect":"pass"}
+{"method":"GET","path":"/logout","expect":"pass"}
+{"method":"GET","path":"/account/settings","expect":"pass"}
+{"method":"GET","path":"/cart","expect":"pass"}
+{"method":"GET","path":"/checkout","query":"step=payment","expect":"pass"}
+{"method":"GET","path":"/","headers":{"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"User-Agent":"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"User-Agent":"curl/8.9.1"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"User-Agent":"Googlebot/2.1 (+http://www.google.com/bot.html)"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"Accept":"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8","Accept-Language":"ja,en-US;q=0.7,en;q=0.3","Accept-Encoding":"gzip, deflate, br"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"Referer":"https://www.example.com/search?q=shoes&page=2"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"Cookie":"session=abc123def456; theme=dark; lang=ja"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"Cookie":"_ga=GA1.2.123456789.1700000000; _gid=GA1.2.987654321.1700000000"},"expect":"pass"}
+{"method":"GET","path":"/api/v1/me","headers":{"Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"If-None-Match":"\"33a64df551425fcc55e4d42a148795d9f25f89d4\"","If-Modified-Since":"Wed, 21 Oct 2026 07:28:00 GMT"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"X-Forwarded-For":"203.0.113.5, 10.0.0.2","X-Forwarded-Proto":"https"},"expect":"pass"}
+{"method":"GET","path":"/","headers":{"Range":"bytes=0-1023"},"expect":"pass"}
+{"method":"HEAD","path":"/","expect":"pass"}
+{"method":"OPTIONS","path":"/api/v1/users","headers":{"Origin":"https://app.example.com","Access-Control-Request-Method":"POST"},"expect":"pass"}
+{"method":"POST","path":"/login","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"username=tanaka&password=correct+horse+battery+staple","expect":"pass"}
+{"method":"POST","path":"/login","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"username=o%27brien&password=p%40ssw0rd%21","expect":"pass"}
+{"method":"POST","path":"/register","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"name=山田太郎&email=taro%40example.com&age=34","expect":"pass"}
+{"method":"POST","path":"/contact","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"subject=Question+about+my+order&message=Hello%2C+I+would+like+to+select+a+different+size.+Thanks%21","expect":"pass"}
+{"method":"POST","path":"/comment","headers":{"Content-Type":"application/x-www-form-urlencoded"},"body":"text=I+loved+this+post%21+It%27s+really+helpful+--+thanks","expect":"pass"}
+{"method":"POST","path":"/api/v1/users","headers":{"Content-Type":"application/json"},"body":"{\"name\":\"Tanaka\",\"email\":\"tanaka@example.com\",\"roles\":[\"viewer\",\"editor\"]}","expect":"pass"}
+{"method":"POST","path":"/api/v1/users","headers":{"Content-Type":"application/json"},"body":"{\"name\":\"日本語の名前\",\"note\":\"これは通常の本文です。\"}","expect":"pass"}
+{"method":"POST","path":"/api/v1/orders","headers":{"Content-Type":"application/json"},"body":"{\"items\":[{\"sku\":\"A-100\",\"qty\":2},{\"sku\":\"B-200\",\"qty\":1}],\"coupon\":null,\"total\":59.8}","expect":"pass"}
+{"method":"POST","path":"/api/v1/search","headers":{"Content-Type":"application/json"},"body":"{\"query\":\"select shoes\",\"filters\":{\"price\":{\"min\":10,\"max\":100}},\"page\":1}","expect":"pass"}
+{"method":"POST","path":"/api/v1/notes","headers":{"Content-Type":"application/json"},"body":"{\"title\":\"Meeting\",\"body\":\"Discuss the Q3 plan; decide on budget -- see the doc.\"}","expect":"pass"}
+{"method":"POST","path":"/api/v1/settings","headers":{"Content-Type":"application/json"},"body":"{\"theme\":\"dark\",\"notifications\":{\"email\":true,\"push\":false},\"languages\":[\"ja\",\"en\"]}","expect":"pass"}
+{"method":"PUT","path":"/api/v1/users/42","headers":{"Content-Type":"application/json"},"body":"{\"displayName\":\"O'Neil\",\"bio\":\"I like rock 'n' roll & jazz.\"}","expect":"pass"}
+{"method":"PATCH","path":"/api/v1/users/42","headers":{"Content-Type":"application/json"},"body":"{\"active\":false}","expect":"pass"}
+{"method":"DELETE","path":"/api/v1/users/42","expect":"pass"}
+{"method":"POST","path":"/graphql","headers":{"Content-Type":"application/json"},"body":"{\"query\":\"query { viewer { id name } }\",\"variables\":{}}","expect":"pass"}
+{"method":"POST","path":"/upload","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nMy holiday photo\r\n--B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"holiday.jpg\"\r\nContent-Type: image/jpeg\r\n\r\nJFIFxxxx\r\n--B--\r\n","expect":"pass"}
+{"method":"POST","path":"/upload","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"doc\"; filename=\"report 2026.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.7 xxxx\r\n--B--\r\n","expect":"pass"}
+{"method":"POST","path":"/upload","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"note\"; filename=\"memo.txt\"\r\nContent-Type: text/plain\r\n\r\nBuy milk, eggs and bread.\r\n--B--\r\n","expect":"pass"}
+{"method":"POST","path":"/upload","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"写真.png\"\r\nContent-Type: image/png\r\n\r\nPNGxxxx\r\n--B--\r\n","expect":"pass"}
+{"method":"POST","path":"/upload","headers":{"Content-Type":"multipart/form-data; boundary=B"},"body":"--B\r\nContent-Disposition: form-data; name=\"f\"; filename=\"archive.tar.gz\"\r\nContent-Type: application/gzip\r\n\r\nxxxx\r\n--B--\r\n","expect":"pass"}
+{"method":"POST","path":"/webhook","headers":{"Content-Type":"application/json","X-Signature":"sha256=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"},"body":"{\"event\":\"order.created\",\"id\":\"evt_123\"}","expect":"pass"}
+{"method":"POST","path":"/api/v1/log","headers":{"Content-Type":"text/plain"},"body":"2026-10-28T10:00:00Z INFO request finished status=200 path=/health","expect":"pass"}
+{"method":"POST","path":"/api/v1/markdown","headers":{"Content-Type":"text/plain"},"body":"# Title\n\nSome **bold** text, a list:\n\n- one\n- two\n\nand a link [here](https://example.com).","expect":"pass"}
+{"method":"POST","path":"/api/v1/csv","headers":{"Content-Type":"text/csv"},"body":"id,name,price\n1,Shirt,19.99\n2,Hat,9.5\n","expect":"pass"}
+{"method":"POST","path":"/api/v1/xml","headers":{"Content-Type":"application/xml"},"body":"<?xml version=\"1.0\"?><order><id>1</id><note>hello</note></order>","expect":"pass"}
+{"method":"POST","path":"/api/v1/echo","headers":{"Content-Type":"application/json"},"body":"{}","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=the+system+update+(version+2)+is+available","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=how+to+exec+a+python+script","expect":"pass"}
+{"method":"GET","path":"/search","query":"q=best+way+to+eval+a+model","expect":"pass"}
+{"method":"GET","path":"/wiki/SQL","expect":"pass"}
+{"method":"GET","path":"/tag/javascript","expect":"pass"}
+{"method":"GET","path":"/","query":"utm_source=newsletter&utm_medium=email&utm_campaign=autumn-sale","expect":"pass"}
+{"method":"GET","path":"/","query":"fbclid=IwAR0abcdefghijklmnopqrstuvwxyz0123456789","expect":"pass"}
+{"method":"GET","path":"/callback","query":"code=4%2F0AX4XfWh&state=xyz123&scope=email+profile","expect":"pass"}
+{"method":"GET","path":"/maps","query":"ll=35.6812,139.7671&z=14","expect":"pass"}
+{"method":"GET","path":"/calendar","query":"date=2026-10-28&view=month","expect":"pass"}
+{"method":"GET","path":"/files/reports/2026/q3.pdf","expect":"pass"}
+{"method":"GET","path":"/files/my%20document%20(1).pdf","expect":"pass"}
+{"method":"GET","path":"/user/tanaka_taro/profile","expect":"pass"}
+{"method":"GET","path":"/a/b/c/d/e/f/g/h/i/j","expect":"pass"}
