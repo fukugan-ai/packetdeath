@@ -30,8 +30,10 @@ Every stage works only when you pass its options.
 | 8 MITM and antivirus | For destinations you name, opens encrypted traffic and inspects downloaded files with ClamAV | `--mitm-list` `--ca-dir` `--clamd` |
 | 9 Malware feeds | Imports public lists of bad destinations daily and cuts them with the blocklist of stage 2 and the iplist of stage 5 | `scripts/pd-malware-feed.sh`; `--blocklist` and `--iplist` (repeatable) |
 | 10 Active defense | Cuts destinations whose certificate chain has been announced as untrustworthy; the blocking side can be put back to watch-only with one action | `--distrust` `--watch-distrust` `--probe-chains` `--defense-off` `--breaker-hosts` |
+| 11 WAF | A reverse proxy in front of your web server that scores every request against built-in rules and refuses, or only records, those over the threshold; it also limits rates and bans repeat offenders | `waf` `waf-test` `waf-report` |
+| 12 IPS policy | Decides per Suricata alert whether to stop, record or ignore, waits for repeated alerts before stopping, never stops the gateway, resolvers or loopback, keeps stopped destinations across a restart, and writes an audit log | `--ips-policy` `--ips-never` `--ips-state` `ips-test` `ips-report` |
 
-Stages 4 to 10 are explained in "Details" and "Active defense".
+Stages 4 to 12 are explained in "Details" and "Active defense".
 Stage 4 uses Suricata, and stage 8 uses ClamAV and a certificate that you install.
 Suricata and ClamAV are separate tools; this repository does not include them.
 
@@ -590,6 +592,8 @@ Running `packetdeath` with no arguments prints the usage lines.
 | `waf` | A web application firewall: a reverse proxy in front of your web server that judges every request before the server sees it | Both |
 | `waf-test` | Runs a file of sample requests through the same judge, without a network, and lists the ones judged differently from what you expected | Both |
 | `waf-report` | Counts the WAF audit log: actions, rules that fired, busiest sources, rules that look like false positives | Both |
+| `ips-test` | Runs a file of Suricata alerts through an IPS policy without a network, and prints what each alert would get | Both |
+| `ips-report` | Counts the IPS audit log: events, signatures that stopped traffic, signatures that only observed, protected destinations | Both |
 
 If you do not pass `--log-dir`, the log folder is `$XDG_STATE_HOME/packetdeath` (or `$HOME/.local/state/packetdeath` if that is unset) on Linux, and `%LOCALAPPDATA%\packetdeath` on Windows.
 Only `service-install` and `service-run` require `--log-dir`, because the service runs as SYSTEM and `%LOCALAPPDATA%` is different there.
@@ -627,6 +631,14 @@ On Windows it reads the capture that you pass with `--pcapng` and judges that (s
 | `--ips-sids` | `<path>` | The list of alert rule numbers (sids) to stop, one per line | None | Optional | Linux. Same |
 | `--ips-severity` | 1 to 3 | Stops alerts whose severity is this value or lower. 1 is the most severe | None (no cut by severity) | Optional | Linux. Same |
 | `--ips-ttl` | seconds | How long a destination stopped because of an alert stays stopped | 300 | Optional | Linux. Same |
+| `--ips-policy` | `<path>` | A rule file (one JSON object per line, first match wins) that says per alert whether to stop, only record, ignore, or stop after repeated alerts. Replaces `--ips-sids` and `--ips-severity` | None (the older options apply) | Optional | Linux. Needs `--eve`. Not together with `--ips-sids` or `--ips-severity` |
+| `--ips-never` | `<path>` | Addresses or CIDRs that are never stopped, one per line | None | Optional | Needs `--ips-policy` |
+| `--ips-allow-private` | no value | Lets the policy stop private (LAN) destinations. Loopback, link-local, multicast, this host, the gateway and the resolvers stay protected | Off (private destinations are protected) | Optional | Needs `--ips-policy` |
+| `--ips-default` | `drop`, `alert` or `ignore` | What an alert gets when no policy line matches | `alert` (record only) | Optional | Needs `--ips-policy` |
+| `--ips-max-entries` | count | Upper limit of stopped destinations and of the repeat-alert table. The entry that expires first is dropped when full | 16384 | Optional | Needs `--ips-policy` |
+| `--ips-state` | `<path>` | A file that keeps the stopped destinations across a restart. Entries whose time has passed are not restored | None (lost on restart) | Optional | Needs `--ips-policy` |
+| `--eve-max-read` | bytes | The most `eve.json` bytes read in one poll | 8388608 | Optional | Needs `--ips-policy` |
+| `--eve-stale` | seconds | Warns when `eve.json` has not changed for this long (Suricata may have stopped) | 900 | Optional | Needs `--ips-policy` |
 | `--pcapng` | `<path>` | The location of the pktmon capture converted with `pktmon etl2pcap` (next part) | None | Required on Windows | On Windows it cuts. On Linux it only judges and records, never cuts, and prints a `[warn]` |
 | `--poll-ms` | milliseconds | How often the `--pcapng` file is reread | 1000 | Optional | Together with `--pcapng` |
 | `--log-dir` | `<path>` | The folder for `flows.jsonl` and `dns.jsonl` | The default location above | Optional | Both |
@@ -814,6 +826,37 @@ The corpora this project is tested with are in `tests/waf/`.
 | Option | Value | What it does | Default | Required |
 |---|---|---|---|---|
 | `--log-dir` | `<path>` | The folder that holds `waf.jsonl` | None | Required |
+| `--since` | `YYYY-MM-DD` | Leave out lines before this day | None | Optional |
+
+### The IPS policy file (`block --ips-policy`)
+
+One JSON object per line. The first line whose conditions all hold decides; a line that cannot be read is skipped and counted, and a policy with no readable line is refused. Conditions: `sid` (a number or `"low-high"`), `classtype` and `category` (both compare with the classification text Suricata prints in `alert.category`), `severity_max`, `src` and `dst` (address or CIDR), `proto`, `dst_port`. Actions: `drop` (with `ttl` seconds), `alert` (record only), `ignore` (no record), `escalate` (needs `count`, `window` and `ttl`: stops the destination when the same source, destination and signature alert `count` times within `window` seconds; until then it only records).
+
+```
+{"sid":2001219,"action":"ignore"}
+{"classtype":"A Network Trojan was detected","action":"drop","ttl":900}
+{"sid":"2210000-2210050","action":"escalate","count":5,"window":60,"ttl":300}
+```
+
+The events are written to `ips.jsonl` in the log folder (`drop`, `observed`, `ignored` is not written, `protected`, `escalated`, `evicted`, `restored`, `stale`, `recovered`, `skipped`). Signature text and traffic content are never written. Change the policy file while `block` runs and it is reread within a second; an unreadable file keeps the previous policy.
+
+### ips-test: check a policy against sample alerts
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--policy` | `<path>` | The policy file | None | Required |
+| `--alerts` | `<path>` | A file of Suricata alert lines (other lines are skipped) | None | Required |
+| `--expect` | `<path>` | One `{"event":"drop"}` line per alert; a difference is printed as `file:line` and the exit code is 1 | None | Optional |
+| `--never` | `<path>` | As for `block` | None | Optional |
+| `--allow-private` | no value | As `--ips-allow-private` | Off | Optional |
+| `--default` | `drop`, `alert` or `ignore` | As `--ips-default` | `alert` | Optional |
+| `--ttl` | seconds | The stop time of a `drop` without its own `ttl` | 600 | Optional |
+
+### ips-report: read the audit log
+
+| Option | Value | What it does | Default | Required |
+|---|---|---|---|---|
+| `--log-dir` | `<path>` | The folder that holds `ips.jsonl` | None | Required |
 | `--since` | `YYYY-MM-DD` | Leave out lines before this day | None | Optional |
 
 ## Details

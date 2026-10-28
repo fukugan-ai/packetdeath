@@ -18,13 +18,13 @@ use std::path::{Path, PathBuf};
 
 /// IPv4 または IPv6 の CIDR。単体 IP は `/32`（IPv4）か `/128`（IPv6）として持つ。
 #[derive(Debug, Clone, Copy)]
-enum Cidr {
+pub(crate) enum Cidr {
     V4 { network: u32, prefix: u8 },
     V6 { network: u128, prefix: u8 },
 }
 
 impl Cidr {
-    fn contains(&self, ip: &IpAddr) -> bool {
+    pub(crate) fn contains(&self, ip: &IpAddr) -> bool {
         match (self, ip) {
             (Cidr::V4 { network, prefix }, IpAddr::V4(v4)) => {
                 masked_eq_u32(v4.to_bits(), *network, *prefix)
@@ -55,7 +55,7 @@ fn masked_eq_u128(addr: u128, network: u128, prefix: u8) -> bool {
 
 /// `line` を1つの `Cidr` へ parse する。`#` 行・空行・不正な IP・範囲外の
 /// prefix（`/999` 等）は `None`（呼び出し側が読み飛ばす）。
-fn parse_line(line: &str) -> Option<Cidr> {
+pub(crate) fn parse_line(line: &str) -> Option<Cidr> {
     let line = line.trim();
     if line.is_empty() || line.starts_with('#') {
         return None;

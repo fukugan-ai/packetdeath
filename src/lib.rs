@@ -20,6 +20,7 @@ pub mod flow;
 pub mod i18n;
 pub mod ids;
 pub mod iplist;
+pub mod ips;
 pub mod judge;
 pub mod proxy;
 pub mod reassemble;

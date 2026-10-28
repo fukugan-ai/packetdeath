@@ -193,6 +193,15 @@ impl IdsDropSet {
         entries.insert((dst_ip, dst_port), now + ttl);
     }
 
+    /// 集合の中身を `entries` ちょうどに入れ替える（段階12の `ips::runtime` が
+    /// 上限つきの集合と揃えるために使う）。mutex が poison していれば何もしない。
+    pub fn replace(&self, entries: Vec<((IpAddr, u16), Instant)>) {
+        let Ok(mut held) = self.entries.lock() else {
+            return;
+        };
+        *held = entries.into_iter().collect();
+    }
+
     /// `(dst_ip, dst_port)` がいま drop 対象か。期限切れ、または一度も
     /// 挿入されていなければ `false`。
     pub fn contains(&self, dst_ip: &IpAddr, dst_port: u16, now: Instant) -> bool {

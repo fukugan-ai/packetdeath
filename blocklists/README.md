@@ -94,3 +94,22 @@ feed の license と利用条件は配布元のものなので、各 feed の fi
 - ThreatFox の `url` の行は取り込まない。URL の host が無料の file 置き場や正規の site のことがあり、host ごと落とすと誤遮断になる。
 - private、loopback、link-local、CGNAT、multicast の IP は list に入らない。feed が汚染されても、LAN と proxy 自身は落ちない。
 - 手で編集しても、次の取得で上書きされる。残したい例外は allowlist に書く。
+
+## IPS の policy を本番へ入れる運用チェックリスト
+
+`packetdeath block` に `--ips-policy` を渡す。設計は `docs/design.md` の「段階12 IDS/IPS の業務水準化」節が正本である。最初は記録だけの policy（`drop` を含まない）で入れ、`ips.jsonl` で効き方を見てから `drop` を足す。
+
+### 手順
+
+1. policy を書く：`~/pd/ips-policy.jsonl` に `{"action":"alert"}` の 1 行だけを置く（どの警告も記録だけになる）。
+2. 配備前に確かめる：`packetdeath ips-test --policy ~/pd/ips-policy.jsonl --alerts <eve.json から抜いた alert の行> ; echo rc=$?`。
+3. 入れる：`systemctl edit packetdeath-block` の drop-in に、既存の `ExecStart` の末尾へ `--ips-policy %h/pd/ips-policy.jsonl --ips-state %h/pd/ips-state.jsonl` を足す。`--ips-sids` と `--ips-severity` を同時に渡している行は先に外す（併用は起動時に拒否される）。再起動は 1 回だけ要る。
+4. 見る：`jq -r .event ~/pd/log/ips.jsonl | sort | uniq -c`。`observed` の行が出れば動いている。`packetdeath ips-report --log-dir ~/pd/log` で、記録だけだった署名（`drop` の候補）と、守られた宛先（policy の向け先の誤り）を読む。
+5. `drop` を足す：候補の署名を 1 つずつ `{"sid":<番号>,"action":"drop","ttl":600}` として policy の先頭へ足す。policy は 1 秒ほどで読み直されるので、再起動は要らない。読めない行を書くと、前の policy のまま `[warn]` が出る。
+6. 戻す：drop-in の削除（`systemctl revert packetdeath-block`）と再起動。状態 file の `~/pd/ips-state.jsonl` は消してよい。policy を `{"action":"alert"}` の 1 行に戻すだけでも、新しく落とすのは止まる（すでに落としている宛先は、その ttl の間は残る）。
+
+### 知っておくこと
+
+- loopback、link-local、multicast、この機械の address、gateway、resolver、private の宛先は、policy が `drop` でも落ちない。private を落としたいときだけ `--ips-allow-private` を足す。
+- Suricata が止まると `eve.json` が増えない。`--eve-stale`（既定 900 秒）の後に `stale` が `ips.jsonl` と標準エラーに 1 回出る。
+- `ips.jsonl` に署名の文と通信の中身は書かない。

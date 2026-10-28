@@ -1,0 +1,9 @@
+{"event_type":"alert","src_ip":"192.168.1.20","dest_ip":"203.0.113.9","dest_port":443,"proto":"TCP","alert":{"signature_id":100,"severity":3,"category":"Misc activity"}}
+{"event_type":"alert","src_ip":"192.168.1.20","dest_ip":"203.0.113.9","dest_port":443,"proto":"TCP","alert":{"signature_id":250,"severity":2,"category":"Misc activity"}}
+{"event_type":"flow","src_ip":"192.168.1.20","dest_ip":"203.0.113.9","dest_port":443}
+{"event_type":"alert","src_ip":"192.168.1.20","dest_ip":"203.0.113.10","dest_port":443,"proto":"TCP","alert":{"signature_id":999,"severity":1,"category":"A Network Trojan was detected"}}
+{"event_type":"alert","src_ip":"192.168.1.20","dest_ip":"198.51.100.5","dest_port":80,"proto":"TCP","alert":{"signature_id":999,"severity":2,"category":"Misc activity"}}
+{"event_type":"alert","src_ip":"192.168.1.20","dest_ip":"203.0.113.11","dest_port":80,"proto":"TCP","alert":{"signature_id":500,"severity":2}}
+{"event_type":"alert","src_ip":"192.168.1.20","dest_ip":"203.0.113.11","dest_port":80,"proto":"TCP","alert":{"signature_id":500,"severity":2}}
+{"event_type":"alert","src_ip":"192.168.1.20","dest_ip":"192.168.1.1","dest_port":53,"proto":"UDP","alert":{"signature_id":250,"severity":2}}
+{"event_type":"alert","src_ip":"192.168.1.20","dest_ip":"203.0.113.12","dest_port":80,"proto":"TCP","alert":{"signature_id":777,"severity":3}}

@@ -2117,9 +2117,9 @@ accept は blocking で待つ。待ち時間を sleep で刻むと、新しい�
 ### 作る物
 
 1. **policy file**（`--ips-policy <path>`、JSON Lines。`--ips-sids` と `--ips-severity` は残し、policy が無いときの挙動を変えない）。1 行 1 規則で、順に評価して最初に当たった規則の action を使う。
-   - 条件：`sid`（数または範囲）、`classtype`、`severity_max`、`category` の部分一致、`src`（CIDR）、`dst`（CIDR）、`proto`、`dst_port`
+   - 条件：`sid`（数または範囲）、`classtype`（Suricata の eve は classtype の名前を持たず、`alert.category` に分類の説明文を出すので、その文と一致で比べる）、`severity_max`、`category`（同じ field の部分一致）、`src`（CIDR）、`dst`（CIDR）、`proto`、`dst_port`
    - action：`drop`（`ttl` 秒。省略は `--ips-ttl`）、`alert`（落とさず audit に `observed` で残す）、`ignore`（audit にも残さない。誤検知の抑制）、`escalate`（閾値つき。下）
-   - 末尾に当たる規則が無い alert は、既定の action（`--ips-default drop|alert|ignore`。既定 `alert`。`--ips-sids` と `--ips-severity` を併用しているときは従来の判定が先に効く）
+   - 末尾に当たる規則が無い alert は、既定の action（`--ips-default drop|alert|ignore`。既定 `alert`）。`--ips-policy` は `--ips-sids` と `--ips-severity` の代わりであり、併用は起動時に拒否する（2 つの判定が順序なく並ぶと、どちらが落としたか追えない）。`--ips-policy` は `--eve` を要る
 2. **段階的な escalate**：`{"action":"escalate","count":5,"window":60,"ttl":900}` は、同じ（src、dst、sid）の組の alert が window の間に count 回に届いたら、その宛先を ttl で落とす。届くまでは `observed`。表は上限つき。
 3. **never-block（安全網）**：`--ips-never <path>`（CIDR の list）と、既定の保護（loopback、link-local、multicast、broadcast、`0.0.0.0`、この host の全 address、既定の gateway と `/etc/resolv.conf` の resolver）。当たった宛先は policy が `drop` でも落とさず、audit に `protected` で残す。既定の保護を外すには `--ips-allow-private` を明示する（LAN の端末が攻撃元のとき、LAN の宛先を落としたい運用のため）。
 4. **drop 集合**：上限（`--ips-max-entries`、既定 16384。溢れたら期限の近い物から消す）。`--ips-state <path>` を渡せば、挿入と期限切れで atomic に書き出し（tmp と rename）、起動時に読む（期限切れは捨てる）。読めなければ空で始めて `[warn]`。
@@ -2156,19 +2156,37 @@ accept は blocking で待つ。待ち時間を sleep で刻むと、新しい�
 
 | ID | 受入条件 | 打つ command | 通ったと判る出力 |
 |---|---|---|---|
-| **PK-170** | **陰性対照**。policy も新しい option も無いとき、PK-30〜37 が従来どおり通る（回帰） | PK-30 から PK-37 を打ち直す。`tests/independent_ids*` の既存 test | 各 ID の「通ったと判る出力」と同じ |
+| **PK-170** | **陰性対照**。policy も新しい option も無いとき、PK-30〜37 が従来どおり通る（回帰） | PK-30 から PK-37 を打ち直す。`src/ids.rs` の単体と `tests/independent_linux_wiring.rs`、`tests/independent_readme_options.rs`、`tests/independent_i18n.rs`、`tests/independent_cli_log_dir_required.rs`、`tests/independent_active_defense.rs` | 各 ID の「通ったと判る出力」と同じ |
 | **PK-171** | policy の条件と action：sid、sid の範囲、classtype、severity_max、src/dst の CIDR、dst_port に当たる alert が、順序どおり最初の規則で `drop`、`alert`、`ignore` になる | `packetdeath ips-test --policy tests/ids/policy.jsonl --alerts tests/ids/alerts.jsonl --expect tests/ids/expect.jsonl; echo rc=$?` | `rc=0` |
-| **PK-172** | escalate：window の間に count 回で `drop`、届かなければ `observed`。window を過ぎると数え直し | `tests/independent_ids_policy.rs`（時刻を注入） | 期待の action の列 |
+| **PK-172** | escalate：window の間に count 回で `drop`、届かなければ `observed`。window を過ぎると数え直し | `cargo test --test independent_ips_runtime`（時刻を注入） | 期待の action の列 |
 | **PK-173** | never-block：loopback、gateway、resolver、この host の address、`--ips-never` の CIDR は、policy が `drop` でも `protected`。`--ips-allow-private` で private だけが外れ、loopback と host の address は外れない | 同上 | `protected`。外れた後の `drop` |
 | **PK-174** | drop 集合の上限と退避：上限を超えると期限の近い物から消え、`evicted` が残る。memory が上限で止まる | 同上（上限 8、100 件を入れる） | 件数 8 以下、`evicted` 92 |
 | **PK-175** | 状態の復元：書き出し、process の再起動に当たる作り直し、読み込み。期限切れは捨てる。壊れた file は空で始まり `[warn]` | 同上 | 復元した件数が期待どおり。壊れた file で起動する |
 | **PK-176** | `eve.json` の読み方：1 poll の上限、1 MiB 超の行を捨てる、rename 型の rotate、copytruncate、不正な UTF-8 の行、追記の途中で切れた行 | 同上 | 落とす対象が期待どおり。捨てた件数が audit にある |
 | **PK-177** | 健全性：増えない file で `--eve-stale` の後に `stale` が 1 回、増え始めて `recovered`。file が無いときも | 同上（時刻を注入） | `stale` 1、`recovered` 1 |
 | **PK-178** | audit の形：1 件 1 行、署名文字列と通信の中身が出ない | `jq` で field を数え、署名文字列の印字（`SECRETSIGNATURE`）を入れた alert の後に `grep -c SECRETSIGNATURE <d>/ips.jsonl` | field が揃う。`grep -c` が 0 |
-| **PK-179** | 読み直し：`--ips-policy` と `--ips-never` を走行中に書き換えると 1 秒以内に変わる。壊れた file と規則 0 件の file は前の内容が残る | `tests/independent_ids_policy.rs` | 書き換え前後で action が変わる。壊れた後も前の action |
+| **PK-179** | 読み直し：`--ips-policy` と `--ips-never` を走行中に書き換えると 1 秒以内に変わる。壊れた file と規則 0 件の file は前の内容が残る | `cargo test --test independent_ips_runtime` | 書き換え前後で action が変わる。壊れた後も前の action |
 | **PK-180** | `ips-report`：event の件数、sid の上位、`observed` のままの sid、`protected` の宛先 | `packetdeath ips-report --log-dir tests/ids/fixture-log` | 期待の行 |
-| **PK-181** | 負荷：alert 10 万行（うち 1 行が 1 MiB 超）を `eve.json` に一度に書いても、読み終えるまで RSS の増加が 64 MiB 未満で、判定の経路（`contains`）の p99 が 1 ms 未満 | `tests/ids/flood.sh` | 値が基準内 |
+| **PK-181** | 負荷：alert 10 万行（うち 1 行が 1 MiB 超）を `eve.json` に一度に書いても、読み終えるまで RSS の増加が 64 MiB 未満で、判定の経路（`contains`）の p99 が 1 ms 未満 | `cargo test --release --test ips_bench -- --ignored --nocapture` | 値が基準内（実測：RSS の増加 23 MiB、1024 回ごとの最遅の p99 が 31 µs） |
 | **PK-182** | 本番の `packetdeath-block` への反映：policy を `observed` のみ（`drop` なし）で入れ、`ips.jsonl` に行が出る。戻し方は drop-in の削除 1 つ | 本番の手順（`blocklists/README.md` の運用チェックリストに足す） | `ips.jsonl` に `observed` の行。通信に変化なし |
+
+### 受入 ID と test の対応（段階12）
+
+| ID | test | 打つ command |
+|---|---|---|
+| PK-170 | `src/ids.rs` の単体（policy の option が無いとき従来どおり）と上の 5 本の統合 test | `cargo test --lib ids::` と `cargo test --test independent_linux_wiring --test independent_readme_options --test independent_i18n --test independent_cli_log_dir_required --test independent_active_defense` |
+| PK-171 | `tests/independent_ips_cli.rs::pk171_*`（fixture は `tests/ids/policy.jsonl`、`alerts.jsonl`、`expect.jsonl`） | `cargo test --test independent_ips_cli` |
+| PK-172 | `src/ips/escalate.rs` の単体、`src/ips/engine.rs::escalate_*`、`tests/independent_ips_cli.rs::pk171_*`（`escalated`） | `cargo test --lib ips::` |
+| PK-173 | `src/ips/never.rs` の単体（gateway と resolver と一覧は pure な入力で確かめる）、`tests/independent_ips_runtime.rs::pk173_*`（loopback と private） | `cargo test --lib ips::never` と `--test independent_ips_runtime` |
+| PK-174 | `src/ips/dropset.rs::a_hundred_inserts_*`、`tests/independent_ips_runtime.rs::pk174_*` | 同上 |
+| PK-175 | `src/ips/dropset.rs` の保存と復元、`tests/independent_ips_runtime.rs::pk175_*` | 同上 |
+| PK-176 | `src/ips/eve.rs` の単体 6 件 | `cargo test --lib ips::eve` |
+| PK-177 | `src/ips/health.rs` の単体、`tests/independent_ips_runtime.rs::pk177_*` | 同上 |
+| PK-178 | `src/ips/audit.rs` の単体、`tests/independent_ips_runtime.rs::pk172_pk178_*` | 同上 |
+| PK-179 | `tests/independent_ips_runtime.rs::pk179_*` | `cargo test --test independent_ips_runtime` |
+| PK-180 | `tests/independent_ips_cli.rs::pk180_*`（fixture は `tests/ids/fixture-log/ips.jsonl`） | `cargo test --test independent_ips_cli` |
+| PK-181 | `tests/ips_bench.rs::pk181_*`（`#[ignore]`。release で打つ） | `cargo test --release --test ips_bench -- --ignored --nocapture` |
+| PK-182 | 本番の手順 | `blocklists/README.md` |
 
 ### 段階の表への追加
 

@@ -69,6 +69,8 @@ enum CliError {
     InvalidBreakerHosts(String),
     /// Stage 10: `defense-report --days` is not an integer.
     InvalidDays(String),
+    /// Stage 12: an IPS option that cannot be read or that conflicts with another.
+    Ips(String),
 }
 
 impl fmt::Display for CliError {
@@ -88,6 +90,7 @@ impl fmt::Display for CliError {
             Self::InvalidDenyMode(v) => packetdeath::i18n::cli_invalid_deny_mode(locale, v),
             Self::InvalidBreakerHosts(v) => packetdeath::i18n::cli_invalid_breaker_hosts(locale, v),
             Self::InvalidDays(v) => packetdeath::i18n::cli_invalid_days(locale, v),
+            Self::Ips(why) => why.clone(),
         };
         write!(f, "{s}")
     }
@@ -166,6 +169,8 @@ struct BlockArgs {
     pcapng_path: Option<PathBuf>,
     /// `--pcapng` 使用時の poll 間隔（ミリ秒）。未指定なら `DEFAULT_POLL_MS`。
     poll_ms: u64,
+    /// 段階12：`--ips-policy` ほか IPS の option。policy が無ければ動かない。
+    ips: packetdeath::ips::options::Options,
 }
 
 /// `--ips-severity` の値を 1〜3 の整数として読む（Suricata の rule の既定の
@@ -194,6 +199,7 @@ fn parse_block_args(args: &[String]) -> Result<BlockArgs, CliError> {
     let mut av_path = None;
     let mut pcapng_path = None;
     let mut poll_ms = DEFAULT_POLL_MS;
+    let mut ips = packetdeath::ips::options::Options::default();
     let mut iter = args.iter();
 
     while let Some(arg) = iter.next() {
@@ -257,11 +263,21 @@ fn parse_block_args(args: &[String]) -> Result<BlockArgs, CliError> {
                 let value = iter.next().ok_or(CliError::MissingValue("--log-dir"))?;
                 log_dir = Some(PathBuf::from(value));
             }
-            other => return Err(CliError::UnknownFlag(other.to_string())),
+            other => match ips.accept(other, &mut iter) {
+                Ok(true) => {}
+                Ok(false) => return Err(CliError::UnknownFlag(other.to_string())),
+                Err(why) => return Err(CliError::Ips(why)),
+            },
         }
     }
+    ips.check(
+        ips_sids_path.is_some() || ips_severity.is_some(),
+        eve_path.is_some(),
+    )
+    .map_err(CliError::Ips)?;
 
     Ok(BlockArgs {
+        ips,
         queue_num,
         blocklist_paths,
         allowlist_path,
@@ -818,6 +834,14 @@ fn main() -> ExitCode {
             Ok(parsed) => exit_code_of(packetdeath::waf::testcmd::run(&parsed)),
             Err(e) => arg_error(locale, e),
         },
+        "ips-test" => match packetdeath::ips::testcmd::parse_test_args(&args[1..]) {
+            Ok(parsed) => exit_code_of(packetdeath::ips::testcmd::run(&parsed)),
+            Err(e) => arg_error(locale, e),
+        },
+        "ips-report" => match packetdeath::ips::report::parse_report_args(&args[1..]) {
+            Ok(parsed) => exit_code_of(packetdeath::ips::report::run(&parsed)),
+            Err(e) => arg_error(locale, e),
+        },
         "waf-report" => match packetdeath::waf::report::parse_report_args(&args[1..]) {
             Ok(parsed) => exit_code_of(packetdeath::waf::report::run(&parsed)),
             Err(e) => arg_error(locale, e),
@@ -959,6 +983,21 @@ fn spawn_eve_watcher(
         );
     });
     Some(stop_tx)
+}
+
+/// 段階12：`--ips-policy` があるときの IPS。policy が読めなければ起動を止める
+/// （policy の無い IPS を黙って動かさない）。戻り値の `Sender` を drop すると止まる。
+#[cfg(target_os = "linux")]
+fn spawn_ips_runtime(
+    config: packetdeath::ips::runtime::Config,
+    drop_set: Arc<IdsDropSet>,
+) -> Result<mpsc::Sender<()>, String> {
+    let runtime = packetdeath::ips::runtime::Runtime::start(config, drop_set)?;
+    let (stop_tx, stop_rx) = mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        packetdeath::ips::runtime::run(runtime, EVE_POLL_INTERVAL, &stop_rx);
+    });
+    Ok(stop_tx)
 }
 
 /// `--blocklist`（複数可）/ `--allowlist` / `--iplist`（複数可）/ `--av` を
@@ -1187,12 +1226,26 @@ fn run_block(parsed: BlockArgs) -> ExitCode {
     // 監視 thread を止めないため、戻り値をこの関数のスコープに残す
     // （`run_block` 自体が呼び出し元が止めるまで戻らない loop なので、
     // 実質プロセス終了まで生存する）。
-    let _eve_stop_tx = spawn_eve_watcher(
-        parsed.eve_path.as_ref(),
-        load_ips_rule(parsed.ips_sids_path.as_ref(), parsed.ips_severity),
-        Arc::clone(&ids_drop_set),
-        Duration::from_secs(parsed.ips_ttl_secs),
-    );
+    let ips_config = parsed.eve_path.clone().and_then(|eve| {
+        parsed
+            .ips
+            .runtime(eve, parsed.ips_ttl_secs, parsed.log_dir.clone())
+    });
+    let _eve_stop_tx = match ips_config {
+        Some(config) => match spawn_ips_runtime(config, Arc::clone(&ids_drop_set)) {
+            Ok(stop_tx) => Some(stop_tx),
+            Err(why) => {
+                eprintln!("packetdeath: [error] ips: {why}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => spawn_eve_watcher(
+            parsed.eve_path.as_ref(),
+            load_ips_rule(parsed.ips_sids_path.as_ref(), parsed.ips_severity),
+            Arc::clone(&ids_drop_set),
+            Duration::from_secs(parsed.ips_ttl_secs),
+        ),
+    };
 
     let config = packetdeath::linux::BlockConfig {
         dns_log: dns_sink.as_ref(),

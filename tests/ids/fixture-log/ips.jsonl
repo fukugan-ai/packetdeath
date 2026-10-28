@@ -1,0 +1,6 @@
+{"ts":"2026-10-27T01:00:00Z","event":"drop","sid":2001219,"severity":1,"classtype":"trojan","dst_ip":"203.0.113.9","dst_port":443,"src_ip":"192.168.1.20","ttl":600,"rule":3,"count":null}
+{"ts":"2026-10-28T01:00:00Z","event":"drop","sid":2001219,"severity":1,"classtype":"trojan","dst_ip":"203.0.113.10","dst_port":443,"src_ip":"192.168.1.20","ttl":600,"rule":3,"count":null}
+{"ts":"2026-10-28T02:00:00Z","event":"escalated","sid":2210000,"severity":2,"classtype":null,"dst_ip":"203.0.113.11","dst_port":80,"src_ip":"192.168.1.21","ttl":300,"rule":6,"count":null}
+{"ts":"2026-10-28T03:00:00Z","event":"observed","sid":2013504,"severity":3,"classtype":null,"dst_ip":"203.0.113.12","dst_port":80,"src_ip":"192.168.1.20","ttl":null,"rule":null,"count":null}
+{"ts":"2026-10-28T03:00:01Z","event":"observed","sid":2013504,"severity":3,"classtype":null,"dst_ip":"203.0.113.12","dst_port":80,"src_ip":"192.168.1.20","ttl":null,"rule":null,"count":null}
+{"ts":"2026-10-28T04:00:00Z","event":"protected","sid":2001219,"severity":1,"classtype":"trojan","dst_ip":"192.168.1.1","dst_port":53,"src_ip":"192.168.1.20","ttl":null,"rule":3,"count":null}

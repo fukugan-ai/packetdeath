@@ -1,0 +1,6 @@
+# Rules are tried in order; the first that holds decides.
+{"sid":100,"action":"ignore"}
+{"sid":"200-299","action":"drop","ttl":60}
+{"classtype":"A Network Trojan was detected","dst_port":443,"action":"drop"}
+{"dst":"198.51.100.0/24","action":"alert"}
+{"sid":500,"action":"escalate","count":2,"window":60,"ttl":300}

@@ -30,8 +30,10 @@ packetdeath は、段を重ねて作ってあります。
 | 8 MITM と antivirus | 指定した宛先に限り、暗号化された通信を開いて、download した file を ClamAV で検査する | `--mitm-list` `--ca-dir` `--clamd` |
 | 9 malware feed | 公開の悪性の一覧を毎日取り込み、2 の blocklist と 5 の iplist で断つ | `scripts/pd-malware-feed.sh`、`--blocklist` と `--iplist`(複数回) |
 | 10 能動防御 | 不信と告知された証明書の鎖を使う宛先を断つ。止める側は 1 操作で見張りに戻せる | `--distrust` `--watch-distrust` `--probe-chains` `--defense-off` `--breaker-hosts` |
+| 11 WAF | web server の前に置く reverse proxy。すべての request を内蔵の規則で採点し、閾値を超えたものを断る、または記録だけする。回数の制限と、繰り返す相手の締め出しもする | `waf` `waf-test` `waf-report` |
+| 12 IPS の policy | Suricata の警告ごとに「止める」「記録」「無視」を決める。繰り返しを待ってから止める。gateway、名前解決の宛先、loopback は止めない。止めた宛先を再起動をまたいで残し、記録を書く | `--ips-policy` `--ips-never` `--ips-state` `ips-test` `ips-report` |
 
-4 から 10 の詳しい説明は、「詳細な動作」と「能動防御」の節にあります。
+4 から 12 の詳しい説明は、「詳細な動作」と「能動防御」の節にあります。
 4 は Suricata、8 は ClamAV と利用者が入れる証明書を使います。
 Suricata と ClamAV は別に入れる道具で、このリポジトリには入っていません。
 
@@ -592,6 +594,8 @@ packetdeath は pktmon を起動しません(止め忘れの事故を避ける�
 | `waf` | web アプリケーションファイアウォール。自分の web サーバーの手前に置く中継役で、サーバーに届く前に全部の request を判定する | どちらも |
 | `waf-test` | 見本の request の file を、ネットワークを使わずに同じ判定器へ通し、期待と違う判定になった行を並べる | どちらも |
 | `waf-report` | WAF の記録を数える。処置の件数、当たった rule、多い送信元、誤検知に見える rule を出す | どちらも |
+| `ips-test` | Suricata の警告の file を、通信なしで IPS の policy に通し、警告ごとの扱いを出す | どちらも |
+| `ips-report` | IPS の記録を数える。出来事の件数、通信を止めた署名、記録だけだった署名、守られた宛先を出す | どちらも |
 
 記録の置き場 `--log-dir` を渡さないと、Linux は `$XDG_STATE_HOME/packetdeath`(無ければ `$HOME/.local/state/packetdeath`)、Windows は `%LOCALAPPDATA%\packetdeath` になります。
 `service-install` と `service-run` だけは、サービスが SYSTEM 権限で動いて `%LOCALAPPDATA%` が変わるため、`--log-dir` が必須です。
@@ -629,6 +633,14 @@ Windows では、`--pcapng` で渡した記録を読んで判定します(次の
 | `--ips-sids` | `<path>` | 止める警告の規則番号(sid)の一覧。1 行に 1 つ | なし | 任意 | Linux。同上 |
 | `--ips-severity` | 1 から 3 | この値以下の重さの警告を止める。1 が最も重い | なし(重さでは止めない) | 任意 | Linux。同上 |
 | `--ips-ttl` | 秒 | 警告で止めた宛先を止め続ける秒数 | 300 | 任意 | Linux。同上 |
+| `--ips-policy` | `<path>` | 警告ごとに「止める」「記録だけ」「無視」「繰り返したら止める」を決める規則の file(1 行に JSON 1 つ、最初に当たった規則が決める)。`--ips-sids` と `--ips-severity` の代わりになる | なし(従来の option が効く) | 任意 | Linux。`--eve` が要る。`--ips-sids`、`--ips-severity` とは一緒に使えない |
+| `--ips-never` | `<path>` | 決して止めない宛先(アドレスか CIDR)。1 行に 1 つ | なし | 任意 | `--ips-policy` が要る |
+| `--ips-allow-private` | 値なし | policy が private(LAN)の宛先を止めてよくする。loopback、link-local、multicast、この機械、gateway、名前解決の宛先は守られたまま | 切(private の宛先は守る) | 任意 | `--ips-policy` が要る |
+| `--ips-default` | `drop`、`alert`、`ignore` | どの規則にも当たらない警告の扱い | `alert`(記録だけ) | 任意 | `--ips-policy` が要る |
+| `--ips-max-entries` | 件数 | 止めている宛先と、繰り返しの表の上限。満杯のときは期限の近いものから外す | 16384 | 任意 | `--ips-policy` が要る |
+| `--ips-state` | `<path>` | 止めている宛先を再起動をまたいで残す file。期限が過ぎたものは戻さない | なし(再起動で消える) | 任意 | `--ips-policy` が要る |
+| `--eve-max-read` | byte | 1 回の確認で読む `eve.json` の最大量 | 8388608 | 任意 | `--ips-policy` が要る |
+| `--eve-stale` | 秒 | `eve.json` がこの秒数のあいだ変わらないと警告する(Suricata が止まったかもしれない) | 900 | 任意 | `--ips-policy` が要る |
 | `--pcapng` | `<path>` | pktmon の記録を `pktmon etl2pcap` で変えた file の場所(次の節) | なし | Windows では必須 | Windows は遮断する。Linux は判定と記録だけで遮断せず `[warn]` を出す |
 | `--poll-ms` | ミリ秒 | `--pcapng` の file を読み直す間隔 | 1000 | 任意 | `--pcapng` と一緒のとき |
 | `--log-dir` | `<path>` | `flows.jsonl` と `dns.jsonl` を置く folder | 上の既定の場所 | 任意 | どちらも |
@@ -816,6 +828,37 @@ rule、除外、3 つの address の file は、動いている間に書き換�
 | option | 値 | 何をするか | 既定値 | 必須 |
 |---|---|---|---|---|
 | `--log-dir` | `<path>` | `waf.jsonl` を置いた folder | なし | 必須 |
+| `--since` | `YYYY-MM-DD` | この日より前の行を除く | なし | 任意 |
+
+### IPS の policy file(`block --ips-policy`)
+
+1 行に JSON 1 つ。条件がすべて成り立つ最初の行が決めます。読めない行は飛ばして数え、読める行が 1 つも無い policy は受け付けません。条件は `sid`(数、または `"下-上"`)、`classtype` と `category`(どちらも Suricata が `alert.category` に出す分類の文と比べる)、`severity_max`、`src` と `dst`(アドレスか CIDR)、`proto`、`dst_port`。処置は `drop`(`ttl` 秒)、`alert`(記録だけ)、`ignore`(記録もしない)、`escalate`(`count`、`window`、`ttl` が要る。同じ送信元、宛先、署名の警告が `window` 秒のうちに `count` 回に届いたら宛先を止める。届くまでは記録だけ)。
+
+```
+{"sid":2001219,"action":"ignore"}
+{"classtype":"A Network Trojan was detected","action":"drop","ttl":900}
+{"sid":"2210000-2210050","action":"escalate","count":5,"window":60,"ttl":300}
+```
+
+出来事は log の folder の `ips.jsonl` に書きます(`drop`、`observed`、`protected`、`escalated`、`evicted`、`restored`、`stale`、`recovered`、`skipped`。`ignore` は書かない)。署名の文と通信の中身は書きません。`block` が動いている間に policy file を書き換えると、1 秒ほどで読み直します。読めない file のときは前の policy のままです。
+
+### ips-test：見本の警告で policy を確かめる
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--policy` | `<path>` | policy file | なし | 必須 |
+| `--alerts` | `<path>` | Suricata の警告の行の file(ほかの行は飛ばす) | なし | 必須 |
+| `--expect` | `<path>` | 警告 1 つにつき `{"event":"drop"}` を 1 行。違えば `file:行` を出して終了コード 1 | なし | 任意 |
+| `--never` | `<path>` | `block` と同じ | なし | 任意 |
+| `--allow-private` | 値なし | `--ips-allow-private` と同じ | 切 | 任意 |
+| `--default` | `drop`、`alert`、`ignore` | `--ips-default` と同じ | `alert` | 任意 |
+| `--ttl` | 秒 | 自分の `ttl` を持たない `drop` の止める秒数 | 600 | 任意 |
+
+### ips-report：記録を読む
+
+| option | 値 | 何をするか | 既定値 | 必須 |
+|---|---|---|---|---|
+| `--log-dir` | `<path>` | `ips.jsonl` を置いた folder | なし | 必須 |
 | `--since` | `YYYY-MM-DD` | この日より前の行を除く | なし | 任意 |
 
 ## 詳細な動作
