@@ -112,10 +112,10 @@ async fn pk199_only_an_administrator_manages_users_and_the_last_one_stays() -> R
     assert_eq!(r.sign_in("otto", PASSWORD).await?.status, StatusCode::UNAUTHORIZED);
     assert_eq!(r.call(Method::GET, "/api/settings", Some(&operator), false, None).await?.status, StatusCode::UNAUTHORIZED);
 
-    let reset = r.call(Method::PATCH, "/api/users/otto", Some(&admin), true, Some(json!({"disabled": false, "password": "a brand new password"}))).await?;
+    let reset = r.call(Method::PATCH, "/api/users/otto", Some(&admin), true, Some(json!({"disabled": false, "password": "a brand new password a brand new password a brand new password a brand new password a brand new password a brand new password a brand new password"}))).await?;
     assert_eq!(reset.status, StatusCode::OK);
     assert_eq!(r.sign_in("otto", PASSWORD).await?.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(r.sign_in("otto", "a brand new password").await?.status, StatusCode::OK);
+    assert_eq!(r.sign_in("otto", "a brand new password a brand new password a brand new password a brand new password a brand new password a brand new password a brand new password").await?.status, StatusCode::OK);
 
     for attempt in [
         r.call(Method::DELETE, "/api/users/alice", Some(&admin), true, None).await?,
@@ -132,6 +132,8 @@ async fn pk199_only_an_administrator_manages_users_and_the_last_one_stays() -> R
 #[tokio::test]
 async fn every_refusal_names_the_place_it_came_from() -> Result<(), Fault> {
     let r = rig("codes")?;
+    let one_short = r.call(Method::POST, "/api/register", None, false, Some(json!({"name": "alice", "password": "x".repeat(127)}))).await?;
+    assert_eq!((one_short.status, one_short.body()?["code"].clone()), (StatusCode::UNPROCESSABLE_ENTITY, json!("PD_USER_PASSWORD")), "127 characters are one too few");
     let short = r.call(Method::POST, "/api/register", None, false, Some(json!({"name": "alice", "password": "short"}))).await?;
     assert_eq!((short.status, short.body()?["code"].clone()), (StatusCode::UNPROCESSABLE_ENTITY, json!("PD_USER_PASSWORD")));
     let odd = r.call(Method::POST, "/api/register", None, false, Some(json!({"name": "a b", "password": PASSWORD}))).await?;

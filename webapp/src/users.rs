@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use crate::{totp, webauthn};
 
 /// Longest and shortest password accepted.
-pub const PASSWORD_MIN: usize = 12;
+pub const PASSWORD_MIN: usize = 128;
 pub const PASSWORD_MAX: usize = 256;
 /// Longest user name.
 pub const NAME_MAX: usize = 128;
@@ -394,7 +394,7 @@ impl Users {
 mod tests {
     use super::*;
 
-    const PW: &str = "correct horse battery";
+    const PW: &str = "correct horse battery staple correct horse battery staple correct horse battery staple correct horse battery staple correct horse battery staple";
 
     fn scratch(name: &str) -> Result<PathBuf, std::io::Error> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join("users-test").join(format!("{}-{name}", std::process::id()));
@@ -460,9 +460,10 @@ mod tests {
         users.set_disabled("bob", true)?;
         assert_eq!(users.verify("bob", PW), None);
         users.set_disabled("bob", false)?;
-        users.set_password("bob", "another long password")?;
+        const NEXT: &str = "another long password another long password another long password another long password another long password another long password";
+        users.set_password("bob", NEXT)?;
         assert_eq!(users.verify("bob", PW), None);
-        assert_eq!(users.verify("bob", "another long password"), Some(Role::Viewer));
+        assert_eq!(users.verify("bob", NEXT), Some(Role::Viewer));
         assert_eq!(users.set_password("ghost", PW), Err(UserError::NotFound));
         Ok(())
     }

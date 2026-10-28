@@ -10,7 +10,7 @@ const WORDS: &[(&str, &str, &str)] = &[
     ("app", "packetdeath コンソール", "packetdeath console"),
     ("account", "アカウント", "Account"),
     ("password", "パスワード", "Password"),
-    ("password_new", "新しいパスワード（12 文字以上）", "New password (12 characters or more)"),
+    ("password_new", "新しいパスワード（128 文字以上）", "New password (128 characters or more)"),
     ("show", "表示する", "Show"),
     ("hide", "隠す", "Hide"),
     ("sign_in", "サインイン", "Sign in"),

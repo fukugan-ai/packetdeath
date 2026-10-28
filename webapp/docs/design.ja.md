@@ -130,7 +130,7 @@ server の拒否は、すべて `{"error": 文, "code": 番号}` で返る。番
 | `PD_MFA_CODE` | 422 | 確認の code が違う |
 | `PD_MFA_STORE` | 500 | 秘密を読み戻せない |
 | `PD_USER_NAME` | 422 | 名前が 1 から 128 文字の英数字と `.` `_` `-` `@` `+` ではない |
-| `PD_USER_PASSWORD` | 422 | password が 12 から 256 文字ではない |
+| `PD_USER_PASSWORD` | 422 | password が 128 から 256 文字ではない（新しい password の長さ。サインインは長さを見ない） |
 | `PD_USER_EXISTS` | 409 | その名前は使われている |
 | `PD_USER_REGISTER_CLOSED` | 409 | 利用者がいるので最初の管理者の登録はできない |
 | `PD_USER_LAST_ADMIN` | 409 | 最後の有効な管理者を消す、無効にする、役を下げる |
@@ -176,6 +176,7 @@ TOTP と回復 code は secure context を要らず、どの PC の http でも�
 
 - **サインインの第二段階**：password が通ると同じ枠の中で入れ替わる。欄は 1 つで、`autocomplete="one-time-code"`、`inputmode="numeric"`、6 桁。passkey を登録済みなら「passkey で確かめる」ボタンが先に並ぶ。回復 code を入れる小さな折りたたみが下にある。
 - **第二要素の登録**（帯の「セキュリティ」の画面、`ui/src/security.rs`。全員が自分の分を開ける。運用者以上で第二要素が無いと、帯の下に「有効にするまで変更できません」の注意が出る）：TOTP は秘密の文字列と `otpauth://` のリンクを出し、確認コードを 1 回通すと有効になる。QR は描かない（描画の部品を足さず、文字列とリンクで足りる）。passkey は「追加」ボタン 1 つで browser の確認が開く。
+- **パスワード管理への引き渡し**：サインインと最初の管理者の登録が成功した時点で、アカウントとパスワードを `PasswordCredential` と `navigator.credentials.store` でブラウザに渡す（Chromium、secure context のとき）。第二段階があるときは、最初の段階で入れたパスワードを第二段階の終わりまで画面の中に保ち、成功、「パスワードに戻る」、券の失効で消す。失敗では渡さない。この API が無いブラウザでは、欄の `autocomplete` に任せる。
 - **回復 code の表示**：10 本を 1 回だけ並べ、「控えました」を押すまで閉じない。再表示はできず、作り直すと古い組は無効になる。
 
 | 受入 ID | 受入 | 測り方 |

@@ -21,7 +21,7 @@ use tower::ServiceExt;
 
 pub type Fault = Box<dyn std::error::Error>;
 
-pub const PASSWORD: &str = "correct horse battery";
+pub const PASSWORD: &str = "correct horse battery staple correct horse battery staple correct horse battery staple correct horse battery staple correct horse battery staple";
 
 pub struct Rig {
     pub app: Router,

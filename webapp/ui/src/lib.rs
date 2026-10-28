@@ -12,6 +12,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen_futures::spawn_local;
 
 pub mod api;
+pub mod credential;
 pub mod editor;
 pub mod i18n;
 pub mod mark;

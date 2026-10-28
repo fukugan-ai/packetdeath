@@ -10,6 +10,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::i18n::{error_line, error_word, t};
 use crate::passkey;
+use crate::credential;
 use crate::api;
 use crate::mark::{LockIcon, Mark, PersonIcon};
 use crate::theme;
@@ -36,6 +37,22 @@ async fn sign_with_passkey(ticket: &str, lang: &str) -> Result<Value, String> {
     api::send("POST", "/api/login/webauthn/finish", "", &answer).await.map_err(|failed| error_line(lang, &failed))
 }
 
+/// Offer the account and its password to the browser's password manager: the one kept from the first step, or else the one just typed.
+/// A passkey sign-in has no password to offer when none was kept.
+fn offer_to_browser(name: String, kept: String, typed: String) {
+    let mut secret = typed;
+    if !kept.is_empty() {
+        secret = kept;
+    }
+    if secret.is_empty() {
+        return;
+    }
+    spawn_local(async move {
+        // Best effort: a browser without the API keeps the form's own autocomplete as the way to save.
+        let _ = credential::offer(&name, &secret).await;
+    });
+}
+
 #[component]
 pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Signal<Option<Me>>) -> Element {
     let mut name = use_signal(String::new);
@@ -47,6 +64,8 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
     let mut code = use_signal(String::new);
     let mut confirm = use_signal(String::new);
     let mut has_passkey = use_signal(|| false);
+    // The password typed in the first step, held until the second step ends so the browser can be offered the pair.
+    let mut kept = use_signal(String::new);
     let l = lang();
     let title = t(&l, if first_run { "register" } else { "sign_in" });
     let password_label = t(&l, if first_run { "password_new" } else { "password" });
@@ -77,11 +96,14 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
             match api::send("POST", path, "", &payload).await {
                 Ok(body) => match (ticket_of(&body), me_of(&body)) {
                     (Some(id), _) => {
+                        kept.set(password());
                         password.set(String::new());
                         has_passkey.set(passkey_of(&body));
                         ticket.set(Some(id));
                     }
                     (None, Some(found)) => {
+                        offer_to_browser(name(), kept(), password());
+                        kept.set(String::new());
                         password.set(String::new());
                         code.set(String::new());
                         ticket.set(None);
@@ -91,6 +113,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                 },
                 Err(failed) => {
                     if failed.code == "PD_AUTH_TICKET" {
+                        kept.set(String::new());
                         ticket.set(None);
                     }
                     error.set(error_line(&lang(), &failed));
@@ -113,6 +136,8 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
             match sign_with_passkey(&id, &lang()).await {
                 Ok(body) => match me_of(&body) {
                     Some(found) => {
+                        offer_to_browser(name(), kept(), String::new());
+                        kept.set(String::new());
                         ticket.set(None);
                         me.set(Some(found));
                     }
@@ -120,6 +145,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                 },
                 Err(line) => {
                     if line.contains("PD_AUTH_TICKET") {
+                        kept.set(String::new());
                         ticket.set(None);
                     }
                     error.set(line);
@@ -173,7 +199,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                         button { class: "primary", r#type: "submit", disabled: busy(), "{t(&l, \"second_submit\")}" }
                         button {
                             class: "quiet", r#type: "button", id: "second-back",
-                            onclick: move |_| { ticket.set(None); code.set(String::new()); error.set(String::new()); },
+                            onclick: move |_| { kept.set(String::new()); ticket.set(None); code.set(String::new()); error.set(String::new()); },
                             "{t(&l, \"second_back\")}"
                         }
                     } else {
@@ -201,7 +227,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                                     value: "{password}",
                                     oninput: move |event| password.set(event.value()),
                                     autocomplete: if first_run { "new-password" } else { "current-password" },
-                                    minlength: if first_run { "12" } else { "1" }, required: true,
+                                    minlength: if first_run { "128" } else { "1" }, required: true,
                                     placeholder: "{password_label}",
                                 }
                                 button {
@@ -225,7 +251,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                                         r#type: if reveal() { "text" } else { "password" },
                                         value: "{confirm}",
                                         oninput: move |event| confirm.set(event.value()),
-                                        autocomplete: "new-password", minlength: "12", required: true,
+                                        autocomplete: "new-password", minlength: "128", required: true,
                                         placeholder: "{t(&l, \"password_again\")}",
                                     }
                                 }
