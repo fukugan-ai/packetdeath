@@ -39,7 +39,7 @@ pub struct Change {
     pub mfa_reset: Option<bool>,
 }
 
-fn fail(status: StatusCode, code: &'static str, text: &str) -> Fail {
+pub(crate) fn fail(status: StatusCode, code: &'static str, text: &str) -> Fail {
     Fail(status, code, text.to_owned())
 }
 
@@ -59,7 +59,7 @@ fn user_fail(error: UserError) -> Fail {
 }
 
 /// Write one audit line. A failure to write is reported on stderr and does not undo the change that was made.
-fn note(state: &Shared, user: &str, action: &'static str, target: &str, ok: bool) {
+pub(crate) fn note(state: &Shared, user: &str, action: &'static str, target: &str, ok: bool) {
     if let Err(why) = state.audit.record(user, action, target, ok, (None, None)) {
         eprintln!("webapp: the audit line was not written: {why}");
     }
@@ -71,7 +71,7 @@ fn cookie_value(state: &Shared, id: &str, max_age: u64) -> Result<HeaderValue, F
     HeaderValue::from_str(&text).map_err(|_| fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_AUTH_COOKIE", "the cookie could not be built"))
 }
 
-fn signed_in(state: &Shared, name: &str, role: Role) -> Reply {
+pub(crate) fn signed_in(state: &Shared, name: &str, role: Role) -> Reply {
     let started = lock(&state.sessions).start(name, role, state.now());
     let (id, csrf) = started.map_err(|why| Fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_AUTH_SESSION_START", why))?;
     let cookie = cookie_value(state, &id, LIFETIME)?;
@@ -107,7 +107,7 @@ pub async fn register(State(state): State<Shared>, Json(body): Json<Credentials>
     signed_in(&state, &body.name, Role::Admin)
 }
 
-fn too_many() -> Fail {
+pub(crate) fn too_many() -> Fail {
     fail(StatusCode::TOO_MANY_REQUESTS, "PD_AUTH_LIMITED", "too many failed sign-ins; try again later")
 }
 
@@ -126,7 +126,12 @@ pub async fn login(State(state): State<Shared>, Extension(source): Extension<Sou
         let issued = lock(&state.tickets).issue(&body.name, role, now);
         let ticket = issued.map_err(|why| Fail(StatusCode::INTERNAL_SERVER_ERROR, "PD_AUTH_SESSION_START", why))?;
         note(&state, &body.name, "login-password", &body.name, true);
-        return Ok(Json(json!({"mfa": true, "ticket": ticket})).into_response());
+        let (totp, keys) = {
+            let users = lock(&state.users);
+            (users.totp_on(&body.name), !users.key_ids(&body.name).is_empty())
+        };
+        let webauthn = keys && state.relying.is_some();
+        return Ok(Json(json!({"mfa": true, "ticket": ticket, "totp": totp, "webauthn": webauthn})).into_response());
     }
     lock(&state.limiter).succeeded(&body.name);
     note(&state, &body.name, "login", &body.name, true);

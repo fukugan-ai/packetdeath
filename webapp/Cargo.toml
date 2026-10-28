@@ -26,6 +26,8 @@ hmac = "0.13"
 sha1 = "0.11"
 data-encoding = "2"
 subtle = "2"
+# WebAuthn: ES256 signature verification only (P-256, SHA-256).
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }
 time = { version = "0.3", features = ["formatting"] }
 
 [dev-dependencies]

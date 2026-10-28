@@ -163,7 +163,7 @@ server の拒否は、すべて `{"error": 文, "code": 番号}` で返る。番
 - 第二は TOTP（RFC 6238）、あわせて回復 code を 10 本発行する。TOTP は中継に弱いので、WebAuthn が使えない場合の代替に置く。
 - 管理者は第二要素を登録するまで、設定の変更と利用者の管理ができない。
 
-部品は `src/totp.rs`（RFC 6238 の計算と照合）と `src/webauthn.rs`（登録と署名の検証）で、どちらも画面を持たない土台である。TOTP は HMAC-SHA1 の `hmac` `sha1` と `subtle`、WebAuthn の署名検証は ES256（P-256）だけを `p256` で行う。`webauthn-rs` は採らない。その下の `webauthn-rs-core` が openssl を必須の依存に持つためである。
+passkey の経路は `src/passkey.rs`（登録の開始と完了、サインインの第二段階の開始と完了。`--rp-id` と `--origin` を両方与えたときだけ有効）にある。部品は `src/totp.rs`（RFC 6238 の計算と照合）、`src/webauthn.rs`（登録と署名の検証）、`src/cbor.rs`（authenticator の応答を読む最小の CBOR 読み取り。整数、バイト列、文字列、配列、写像だけ、長さが決まった形だけ、深さに上限）で、どれも画面を持たない土台である。CBOR の読み取りを自前にするのは、候補の `ciborium` の最終更新が 2024-01-24 で止まっているためである（crates.io の API で読んだ）。TOTP は HMAC-SHA1 の `hmac` `sha1` と `subtle`、WebAuthn の署名検証は ES256（P-256）だけを `p256` で行う。`webauthn-rs` は採らない。その下の `webauthn-rs-core` が openssl を必須の依存に持つためである。
 
 **別の PC から入る場合。**WebAuthn は secure context（HTTPS、または localhost）でしか動かない（MDN の Web Authentication API は HTTPS を要件としている。localhost の扱いは仕様の側の記述で、今回は読んでいない）。LAN の IP に http で入ると `navigator.credentials` が無く、passkey は出ない。別の PC から使える形は次の 2 つである。
 

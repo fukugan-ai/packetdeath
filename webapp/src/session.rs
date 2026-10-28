@@ -168,6 +168,47 @@ impl Tickets {
     }
 }
 
+/// A WebAuthn challenge lives this long, and is used once.
+pub const CHALLENGE_LIFETIME: u64 = 300;
+/// Challenges held at once.
+pub const MAX_CHALLENGES: usize = 256;
+
+/// Challenges handed to a browser and not yet answered: a label (`register:<name>` or `login:<ticket>`) to the bytes and the time. Memory only.
+#[derive(Default)]
+pub struct Challenges {
+    open: HashMap<String, (Vec<u8>, u64)>,
+}
+
+impl Challenges {
+    /// A new random challenge under `label` (a second one under the same label replaces the first).
+    pub fn issue(&mut self, label: &str, now: u64) -> Result<Vec<u8>, String> {
+        self.open.retain(|_, (_, born)| now.saturating_sub(*born) < CHALLENGE_LIFETIME);
+        while self.open.len() >= MAX_CHALLENGES {
+            let oldest = self.open.iter().min_by_key(|(_, (_, born))| *born).map(|(label, _)| label.clone());
+            let Some(label) = oldest else { break };
+            self.open.remove(&label);
+        }
+        let mut bytes = vec![0_u8; 32];
+        getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
+        self.open.insert(label.to_owned(), (bytes.clone(), now));
+        Ok(bytes)
+    }
+
+    /// The challenge under `label`, removed: an answer can use it once.
+    pub fn take(&mut self, label: &str, now: u64) -> Option<Vec<u8>> {
+        let (bytes, born) = self.open.remove(label)?;
+        (now.saturating_sub(born) < CHALLENGE_LIFETIME).then_some(bytes)
+    }
+
+    pub fn len(&self) -> usize {
+        self.open.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.open.is_empty()
+    }
+}
+
 fn alive(entry: &Entry, now: u64) -> bool {
     now.saturating_sub(entry.started) < LIFETIME && now.saturating_sub(entry.last) < IDLE
 }

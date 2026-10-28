@@ -14,7 +14,7 @@ use argon2::Argon2;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::totp;
+use crate::{totp, webauthn};
 
 /// Longest and shortest password accepted.
 pub const PASSWORD_MIN: usize = 12;
@@ -56,6 +56,17 @@ struct Stored {
     /// SHA-256 (hex) of each unused recovery code.
     #[serde(default)]
     recovery: Vec<String>,
+    /// Passkeys and security keys.
+    #[serde(default)]
+    keys: Vec<Key>,
+}
+
+/// A WebAuthn key: its id and public key (base64url) and the last signature counter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Key {
+    id: String,
+    public_key: String,
+    count: u32,
 }
 
 /// A user as the screens see it: no hash, no secret.
@@ -122,6 +133,10 @@ fn hash_of(password: &str) -> Result<String, UserError> {
 fn name_ok(name: &str) -> bool {
     (1..=NAME_MAX).contains(&name.len())
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | '+'))
+}
+
+fn has_factor(user: &Stored) -> bool {
+    !user.keys.is_empty() || user.totp.as_ref().is_some_and(|t| t.active)
 }
 
 /// The form a recovery code is compared in: upper case, no dashes or spaces.
@@ -192,7 +207,7 @@ impl Users {
             return Err(UserError::Exists);
         }
         let hash = hash_of(password)?;
-        self.list.push(Stored { name: name.to_owned(), role, hash, disabled: false, created: now, totp: None, recovery: Vec::new() });
+        self.list.push(Stored { name: name.to_owned(), role, hash, disabled: false, created: now, totp: None, recovery: Vec::new(), keys: Vec::new() });
         self.save()
     }
 
@@ -212,7 +227,7 @@ impl Users {
     }
 
     pub fn list(&self) -> Vec<View> {
-        let view = |u: &Stored| View { name: u.name.clone(), role: u.role, disabled: u.disabled, created: u.created, mfa: u.totp.as_ref().is_some_and(|t| t.active) };
+        let view = |u: &Stored| View { name: u.name.clone(), role: u.role, disabled: u.disabled, created: u.created, mfa: has_factor(u) };
         self.list.iter().map(view).collect()
     }
 
@@ -254,9 +269,54 @@ impl Users {
         self.save()
     }
 
-    /// Whether `name` has a second factor on.
+    /// Whether `name` has a second factor on (a confirmed TOTP secret or a key).
     pub fn mfa_on(&self, name: &str) -> bool {
+        self.list.iter().any(|u| u.name == name && has_factor(u))
+    }
+
+    /// Whether `name` has a confirmed TOTP secret.
+    pub fn totp_on(&self, name: &str) -> bool {
         self.list.iter().any(|u| u.name == name && u.totp.as_ref().is_some_and(|t| t.active))
+    }
+
+    /// The ids of the keys of `name`.
+    pub fn key_ids(&self, name: &str) -> Vec<Vec<u8>> {
+        let Some(user) = self.list.iter().find(|u| u.name == name) else {
+            return Vec::new();
+        };
+        user.keys.iter().filter_map(|k| webauthn::unb64(&k.id).ok()).collect()
+    }
+
+    /// The public key and counter of key `id` of `name`.
+    pub fn key_for(&self, name: &str, id: &[u8]) -> Option<(Vec<u8>, u32)> {
+        let user = self.list.iter().find(|u| u.name == name)?;
+        let key = user.keys.iter().find(|k| k.id == webauthn::b64(id))?;
+        Some((webauthn::unb64(&key.public_key).ok()?, key.count))
+    }
+
+    /// Keep a new key. The first second factor of the user also issues the recovery codes, returned to be shown once.
+    pub fn add_key(&mut self, name: &str, id: &[u8], public_key: &[u8], count: u32) -> Result<Option<Vec<String>>, UserError> {
+        let at = self.index(name)?;
+        let first = !has_factor(&self.list[at]);
+        self.list[at].keys.push(Key { id: webauthn::b64(id), public_key: webauthn::b64(public_key), count });
+        let mut shown = None;
+        if first {
+            let (codes, kept) = new_recovery_codes()?;
+            self.list[at].recovery = kept;
+            shown = Some(codes);
+        }
+        self.save()?;
+        Ok(shown)
+    }
+
+    /// Record the counter an assertion carried.
+    pub fn set_key_count(&mut self, name: &str, id: &[u8], count: u32) -> Result<(), UserError> {
+        let at = self.index(name)?;
+        let wanted = webauthn::b64(id);
+        if let Some(key) = self.list[at].keys.iter_mut().find(|k| k.id == wanted) {
+            key.count = count;
+        }
+        self.save()
     }
 
     /// Start a second factor: a new secret, pending until `totp_confirm`. Returns the base32 text.
@@ -317,6 +377,7 @@ impl Users {
         let at = self.index(name)?;
         self.list[at].totp = None;
         self.list[at].recovery.clear();
+        self.list[at].keys.clear();
         self.save()
     }
 

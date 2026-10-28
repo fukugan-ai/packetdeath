@@ -19,7 +19,8 @@ use axum::{Json, Router};
 use serde_json::json;
 
 use crate::audit::Audit;
-use crate::session::{Limiter, Sessions, Tickets, Who};
+use crate::session::{Challenges, Limiter, Sessions, Tickets, Who};
+use crate::webauthn::Relying;
 use crate::settings::Store;
 use crate::users::{Role, Users};
 
@@ -31,6 +32,9 @@ pub struct AppState {
     pub users: Mutex<Users>,
     pub sessions: Mutex<Sessions>,
     pub tickets: Mutex<Tickets>,
+    pub challenges: Mutex<Challenges>,
+    /// The name and origin passkeys are bound to; `None` turns passkeys off (a passkey needs an HTTPS name).
+    pub relying: Option<Relying>,
     pub limiter: Mutex<Limiter>,
     pub settings: Store,
     pub audit: Audit,
@@ -158,13 +162,17 @@ async fn harden(req: Request, next: Next) -> Response {
 
 /// The router with every route and the two layers.
 pub fn router(state: Shared) -> Router {
-    use crate::{account, pages, setting};
+    use crate::{account, pages, passkey, setting};
     Router::new()
         .route("/healthz", get(pages::health))
         .route("/api/bootstrap", get(account::bootstrap))
         .route("/api/register", post(account::register))
         .route("/api/login", post(account::login))
         .route("/api/login/second", post(account::login_second))
+        .route("/api/login/webauthn/begin", post(passkey::login_begin))
+        .route("/api/login/webauthn/finish", post(passkey::login_finish))
+        .route("/api/mfa/webauthn/begin", post(passkey::register_begin))
+        .route("/api/mfa/webauthn/finish", post(passkey::register_finish))
         .route("/api/logout", post(account::logout))
         .route("/api/mfa/totp/begin", post(account::totp_begin))
         .route("/api/mfa/totp/confirm", post(account::totp_confirm))
@@ -189,6 +197,8 @@ pub struct Config {
     pub secure: bool,
     /// `--second-factor-optional`: operators and administrators may change settings without a second factor.
     pub mfa_optional: bool,
+    /// `--rp-id` with `--origin`: passkeys on, bound to this name.
+    pub relying: Option<Relying>,
 }
 
 fn need(found: Option<PathBuf>, flag: &str) -> Result<PathBuf, String> {
@@ -200,15 +210,18 @@ pub fn parse_args(args: &[String]) -> Result<Config, String> {
     let mut listen = SocketAddr::from(([127, 0, 0, 1], 8088));
     let (mut data, mut config, mut logs, mut static_dir) = (None, None, None, None);
     let (mut secure, mut remote, mut mfa_optional) = (false, false, false);
+    let (mut rp_id, mut origin) = (None::<String>, None::<String>);
     let mut it = args.iter();
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--secure" => secure = true,
             "--second-factor-optional" => mfa_optional = true,
             "--allow-remote" => remote = true,
-            "--listen" | "--data" | "--config" | "--logs" | "--static" => {
+            "--listen" | "--data" | "--config" | "--logs" | "--static" | "--rp-id" | "--origin" => {
                 let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
                 match flag.as_str() {
+                    "--rp-id" => rp_id = Some(value.clone()),
+                    "--origin" => origin = Some(value.clone()),
                     "--listen" => listen = value.parse().map_err(|e| format!("--listen: {e}"))?,
                     "--data" => data = Some(PathBuf::from(value)),
                     "--config" => config = Some(PathBuf::from(value)),
@@ -222,7 +235,12 @@ pub fn parse_args(args: &[String]) -> Result<Config, String> {
     if !listen.ip().is_loopback() && !remote {
         return Err(String::from("--listen beyond this machine needs --allow-remote"));
     }
-    Ok(Config { listen, data: need(data, "--data")?, config: need(config, "--config")?, logs: need(logs, "--logs")?, static_dir, secure, mfa_optional })
+    let relying = match (rp_id, origin) {
+        (Some(id), Some(origin)) => Some(Relying { id, origin }),
+        (None, None) => None,
+        _ => return Err(String::from("--rp-id and --origin go together")),
+    };
+    Ok(Config { listen, data: need(data, "--data")?, config: need(config, "--config")?, logs: need(logs, "--logs")?, static_dir, secure, mfa_optional, relying })
 }
 
 fn wall_clock() -> u64 {
@@ -243,6 +261,8 @@ pub fn build(c: &Config) -> Result<Shared, String> {
         users: Mutex::new(users),
         sessions: Mutex::new(Sessions::default()),
         tickets: Mutex::new(Tickets::default()),
+        challenges: Mutex::new(Challenges::default()),
+        relying: c.relying.clone(),
         limiter: Mutex::new(Limiter::default()),
         settings,
         audit,
