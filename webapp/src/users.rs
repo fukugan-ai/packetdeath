@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 pub const PASSWORD_MIN: usize = 12;
 pub const PASSWORD_MAX: usize = 256;
 /// Longest user name.
-pub const NAME_MAX: usize = 64;
+pub const NAME_MAX: usize = 128;
 
 /// What a user may do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -63,7 +63,7 @@ pub enum UserError {
 impl std::fmt::Display for UserError {
     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            UserError::BadName => write!(out, "the name must be 1 to {NAME_MAX} of letters, digits, '.', '_' or '-'"),
+            UserError::BadName => write!(out, "the name must be 1 to {NAME_MAX} of letters, digits, '.', '_', '-', '@' or '+'"),
             UserError::WeakPassword => write!(out, "the password must be {PASSWORD_MIN} to {PASSWORD_MAX} characters"),
             UserError::Exists => write!(out, "that name is taken"),
             UserError::NotFound => write!(out, "no such user"),
@@ -90,7 +90,7 @@ fn hash_of(password: &str) -> Result<String, UserError> {
 
 fn name_ok(name: &str) -> bool {
     (1..=NAME_MAX).contains(&name.len())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | '+'))
 }
 
 fn password_ok(password: &str) -> bool {
@@ -256,6 +256,7 @@ mod tests {
         assert_eq!(users.create(&"x".repeat(NAME_MAX + 1), PW, Role::Viewer, 0), Err(UserError::BadName));
         assert_eq!(users.create("bob", "short", Role::Viewer, 0), Err(UserError::WeakPassword));
         users.create("bob", PW, Role::Viewer, 0)?;
+        users.create("carol.smith+pd@example.org", PW, Role::Viewer, 0)?;
         assert_eq!(users.create("bob", PW, Role::Viewer, 0), Err(UserError::Exists));
         Ok(())
     }

@@ -149,6 +149,18 @@ async fn every_refusal_names_the_place_it_came_from() -> Result<(), Fault> {
 }
 
 #[tokio::test]
+async fn pk199_a_name_may_be_an_address_with_at_and_plus() -> Result<(), Fault> {
+    let r = rig("pk199-at")?;
+    let admin = r.register("alice@example.org").await?;
+    let mail = r.user_with(&admin, "carol.smith+pd@example.org", "viewer").await?;
+    let listed = r.call(Method::GET, "/api/bootstrap", Some(&mail), false, None).await?;
+    assert_eq!(listed.body()?["me"]["name"], "carol.smith+pd@example.org");
+    let changed = r.call(Method::PATCH, "/api/users/carol.smith+pd@example.org", Some(&admin), true, Some(json!({"role": "operator"}))).await?;
+    assert_eq!(changed.status, StatusCode::OK, "{}", changed.text);
+    Ok(())
+}
+
+#[tokio::test]
 async fn signing_out_ends_the_session() -> Result<(), Fault> {
     let r = rig("logout")?;
     let admin = r.register("alice").await?;

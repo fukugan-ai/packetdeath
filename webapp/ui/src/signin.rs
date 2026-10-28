@@ -81,7 +81,7 @@ pub fn Signin(first_run: bool, lang: Signal<String>, dark: Signal<bool>, me: Sig
                                     r#type: "text", id: "username", name: "username",
                                     value: "{name}",
                                     oninput: move |event| name.set(event.value()),
-                                    autocomplete: "username", maxlength: 64, required: true,
+                                    autocomplete: "username", maxlength: 128, required: true,
                                     placeholder: "{t(&l, \"account\")}",
                                 }
                             }

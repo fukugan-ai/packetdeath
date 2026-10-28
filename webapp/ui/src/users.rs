@@ -87,7 +87,7 @@ pub fn Users(lang: Signal<String>, user: Me, me: Signal<Option<Me>>) -> Element 
                 }
             }
             form { class: "card create", onsubmit: create,
-                input { r#type: "text", id: "new-username", name: "username", value: "{new_name}", placeholder: "{t(&l, \"name\")}", maxlength: 64, required: true, autocomplete: "username",
+                input { r#type: "text", id: "new-username", name: "username", value: "{new_name}", placeholder: "{t(&l, \"name\")}", maxlength: 128, required: true, autocomplete: "username",
                     oninput: move |event| new_name.set(event.value()) }
                 input { r#type: "password", id: "new-user-password", name: "new-password", value: "{new_password}", placeholder: "{t(&l, \"password_new\")}", minlength: "12", required: true, autocomplete: "new-password",
                     oninput: move |event| new_password.set(event.value()) }

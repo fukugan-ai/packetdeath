@@ -122,7 +122,7 @@ server の拒否は、すべて `{"error": 文, "code": 番号}` で返る。番
 | `PD_AUTH_ROLE` | 403 | 役が足りない |
 | `PD_AUTH_CSRF` | 403 | CSRF token が無い、または違う |
 | `PD_AUTH_COOKIE`、`PD_AUTH_SESSION_START` | 500 | cookie または session を作れない |
-| `PD_USER_NAME` | 422 | 名前が 1 から 64 文字の英数字と `.` `_` `-` ではない |
+| `PD_USER_NAME` | 422 | 名前が 1 から 128 文字の英数字と `.` `_` `-` `@` `+` ではない |
 | `PD_USER_PASSWORD` | 422 | password が 12 から 256 文字ではない |
 | `PD_USER_EXISTS` | 409 | その名前は使われている |
 | `PD_USER_REGISTER_CLOSED` | 409 | 利用者がいるので最初の管理者の登録はできない |
